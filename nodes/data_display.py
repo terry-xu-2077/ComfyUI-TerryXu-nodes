@@ -1,5 +1,5 @@
 import comfy
-from comfy.sd import ModelPatcher
+from comfy.sd import model_patcher
 from nodes import MAX_RESOLUTION
 from PIL import Image, ImageOps, ImageSequence
 import numpy as np
