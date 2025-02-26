@@ -28,9 +28,8 @@ class DataDisplayNode:
 
     CATEGORY = "TerryXu"
     RETURN_TYPES = ("*",)
-    RETURN_NAMES = ("output",)
+    RETURN_NAMES = ("*",)
     FUNCTION = "process_data"
-    TITLE = "✨Smart Data Display"
 
     def process_data(self, input=None):
         # 数据更新逻辑
@@ -48,12 +47,3 @@ class DataDisplayNode:
     @classmethod
     def VALIDATE_INPUTS(s, input):
         return True
-
-# 节点注册
-NODE_CLASS_MAPPINGS = {
-    "DataDisplayNode": DataDisplayNode
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "DataDisplayNode": "✨Smart Data Display (TerryXu)"
-}
