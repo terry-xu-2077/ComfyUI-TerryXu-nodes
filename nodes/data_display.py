@@ -1,5 +1,5 @@
 import comfy
-from comfy.sd import model_patcher
+from comfy import model_patcher
 from nodes import MAX_RESOLUTION
 from PIL import Image, ImageOps, ImageSequence
 import numpy as np
@@ -22,13 +22,13 @@ class DataDisplayNode:
     def INPUT_TYPES(cls):
         return {
             "optional": {
-                "input": ("*",),  # 接受任意类型输入
+                "any": ("*",),  # 接受任意类型输入
             },
         }
 
     CATEGORY = "TerryXu"
     RETURN_TYPES = ("*",)
-    RETURN_NAMES = ("*",)
+    RETURN_NAMES = ("any",)
     FUNCTION = "process_data"
 
     def process_data(self, input=None):
