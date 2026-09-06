@@ -87,7 +87,7 @@
     "description": "Manually select workflow groups and independently enable or bypass the nodes inside each group."
   },
   "TerryXuH3PromptEditor": {
-    "display_name": "H3 Prompt Editor",
+    "display_name": "📃 H3 Prompt Editor",
     "description": "Visual MiniMax H3 prompt editor with dynamic image, video and audio references. Use @ for media and / for H3 syntax commands; output is always standard H3 STRING text.",
     "inputs": {
       "prompt": {
