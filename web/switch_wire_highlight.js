@@ -87,7 +87,7 @@ function selectedSwitchLinks(graph) {
 
 // Same proven strategy as wire_bus_visual.js: temporarily remove only the
 // selected links during ComfyUI's native pass, then restore them immediately
-// and redraw just those links with a stronger same-color selection treatment.
+// and redraw just those links with a stronger selection treatment.
 function hideLinksForNativeDraw(graph, links) {
   if (!graph || !links?.length) return () => {};
 
@@ -181,38 +181,64 @@ function makeLinkPath(ctx, start, end) {
   return true;
 }
 
+function lightenLinkColor(color, whiteMix = 0.48) {
+  const raw = String(color || "").trim();
+  let r = null, g = null, b = null;
+  const hex = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hex) {
+    const h = hex[1].length === 3
+      ? hex[1].split("").map((c) => c + c).join("")
+      : hex[1];
+    r = parseInt(h.slice(0, 2), 16);
+    g = parseInt(h.slice(2, 4), 16);
+    b = parseInt(h.slice(4, 6), 16);
+  } else {
+    const rgb = raw.match(/^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)/i);
+    if (rgb) {
+      r = Number(rgb[1]);
+      g = Number(rgb[2]);
+      b = Number(rgb[3]);
+    }
+  }
+  if (![r, g, b].every(Number.isFinite)) return color;
+  const mix = Math.max(0, Math.min(1, Number(whiteMix) || 0));
+  const blend = (value) => Math.round(value + (255 - value) * mix);
+  return `rgb(${blend(r)}, ${blend(g)}, ${blend(b)})`;
+}
+
 function drawHighlightedLink(ctx, start, end, color, baseWidth) {
   if (!ctx) return;
   const width = Math.max(2.5, Number(baseWidth) || 3);
+  const bright = lightenLinkColor(color, 0.48);
 
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // Wide soft glow using the line's own type color.
+  // Broad soft glow stays in the original type color.
   if (makeLinkPath(ctx, start, end)) {
     ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.42;
-    ctx.lineWidth = width + 5.5;
+    ctx.globalAlpha = 0.38;
+    ctx.lineWidth = width + 5.8;
     ctx.shadowColor = color;
-    ctx.shadowBlur = 13;
+    ctx.shadowBlur = 14;
     ctx.stroke();
   }
 
-  // Visible same-color halo/outline around the core.
+  // Original type color becomes the outer outline.
   ctx.shadowBlur = 0;
   if (makeLinkPath(ctx, start, end)) {
     ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.82;
-    ctx.lineWidth = width + 2.4;
+    ctx.globalAlpha = 0.96;
+    ctx.lineWidth = width + 2.5;
     ctx.stroke();
   }
 
-  // Keep the original type color, but make the selected route itself thicker.
+  // Slimmer inner core: same hue mixed toward white for clear contrast.
   if (makeLinkPath(ctx, start, end)) {
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = bright;
     ctx.globalAlpha = 1;
-    ctx.lineWidth = width + 0.9;
+    ctx.lineWidth = Math.max(2.0, width - 0.45);
     ctx.stroke();
   }
 
