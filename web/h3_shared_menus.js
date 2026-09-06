@@ -522,16 +522,15 @@ export function attachH3Menus({ node, editor, mode = "prompt", onChange = null }
   const onBeforeInput = (event) => { if (event.inputType !== "insertText" || (event.data !== "@" && event.data !== "/")) return; const trigger = event.data; setTimeout(() => trigger === "@" ? openAssetMenu(controller) : openCommandMenu(controller), 0); };
   const onInput = () => { if (controller.menu) queueMicrotask(() => refreshOpenMenu(controller)); };
   const onKeyDown = (event) => { if (handleCommandKey(controller, event)) { event.preventDefault(); event.stopPropagation(); return; } if (event.key === "Escape" && controller.menu) { closeMenu(controller); event.preventDefault(); event.stopPropagation(); } };
-  const onBlur = () => setTimeout(() => { if (!controller.menu?.matches?.(":hover")) closeMenu(controller); }, 120);
   const onPointer = (event) => event.stopPropagation();
   const onDocumentPointer = (event) => {
     const menu = controller.menu;
     if (!menu || menu.contains(event.target)) return;
     closeMenu(controller);
   };
-  editor.addEventListener("beforeinput", onBeforeInput); editor.addEventListener("input", onInput); editor.addEventListener("keydown", onKeyDown); editor.addEventListener("blur", onBlur); editor.addEventListener("pointerdown", onPointer);
+  editor.addEventListener("beforeinput", onBeforeInput); editor.addEventListener("input", onInput); editor.addEventListener("keydown", onKeyDown); editor.addEventListener("pointerdown", onPointer);
   document.addEventListener("pointerdown", onDocumentPointer, true);
-  controller.cleanup = () => { closeMenu(controller); editor.removeEventListener("beforeinput", onBeforeInput); editor.removeEventListener("input", onInput); editor.removeEventListener("keydown", onKeyDown); editor.removeEventListener("blur", onBlur); editor.removeEventListener("pointerdown", onPointer); document.removeEventListener("pointerdown", onDocumentPointer, true); };
+  controller.cleanup = () => { closeMenu(controller); editor.removeEventListener("beforeinput", onBeforeInput); editor.removeEventListener("input", onInput); editor.removeEventListener("keydown", onKeyDown); editor.removeEventListener("pointerdown", onPointer); document.removeEventListener("pointerdown", onDocumentPointer, true); };
   return controller;
 }
 export function detachH3Menus(editor) { const controller = controllers.get(editor); controller?.cleanup?.(); controllers.delete(editor); }
