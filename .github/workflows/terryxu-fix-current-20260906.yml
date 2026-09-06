@@ -1,0 +1,499 @@
+name: TerryXu one-shot current fixes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-fix-current-20260906.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def load(path):
+              return Path(path).read_text(encoding="utf-8")
+
+          def save(path, text):
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace_once(path, old, new):
+              text = load(path)
+              if old not in text:
+                  raise RuntimeError(f"anchor not found in {path}: {old[:120]!r}")
+              save(path, text.replace(old, new, 1))
+
+          def sub_once(path, pattern, replacement, flags=0):
+              text = load(path)
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise RuntimeError(f"regex anchor count={count} in {path}: {pattern}")
+              save(path, updated)
+
+          # 1) Disable the H3 shot timeline node without deleting its source files.
+          for path in ["__init__.py", "nodes/__init__.py"]:
+              text = load(path)
+              text = re.sub(r"(?m)^\s*from \.h3_shot_timeline import H3ShotTimeline\s*\n", "", text)
+              text = re.sub(r"(?m)^\s*H3ShotTimeline,\s*\n", "", text)
+              save(path, text)
+
+          # 2) Simplify the H3 @ menu: connected image/video/audio references only.
+          simple_asset_menu = r'''function openAssetMenu(controller) {
+            const { node, editor, mode } = controller;
+            const hit = caretRange(editor, "@");
+            if (!hit) { closeMenu(controller); return false; }
+            closeMenu(controller);
+
+            const allAssets = assets(node, mode);
+            const visible = allAssets.filter((asset) =>
+              !hit.query || `${asset.name} ${asset.label} ${asset.displayLabel} ${asset.kind}`.toLowerCase().includes(hit.query)
+            );
+
+            const menu = document.createElement("div");
+            menu.className = "terry-h3-role-menu terry-h3-shared-module-menu";
+            controller.menu = menu;
+            controller.menuType = "asset";
+            document.body.append(menu);
+
+            const legend = document.createElement("div");
+            legend.className = "terry-h3-role-legend";
+            const title = document.createElement("div");
+            title.className = "terry-h3-role-title";
+            title.innerHTML = "<b>引用参考</b><span>仅显示已连接的图片、视频和音频</span>";
+            legend.append(title);
+            menu.append(legend);
+
+            for (const asset of visible) {
+              menu.append(makeAssetRow(asset, asset.displayLabel, () => insertMediaReference(controller, hit, asset)));
+            }
+            if (!visible.length) {
+              const empty = document.createElement("div");
+              empty.className = "terry-h3-role-empty";
+              empty.textContent = allAssets.length ? "没有匹配的参考资产。" : "还没有连接图片、视频或音频参考。";
+              menu.append(empty);
+            }
+            placeMenu(menu, editor, 430, 520);
+            return true;
+          }'''
+          sub_once(
+              "web/h3_shared_menus.js",
+              r"function openAssetMenu\(controller\) \{.*?\n\}\n\nfunction nextSpeaker",
+              simple_asset_menu + "\n\nfunction nextSpeaker",
+              re.S,
+          )
+
+          # 3) Merge wired + wireless bus into the wireless bus nodes.
+          replace_once("web/wire_bus.js", 'wirelessPackTitle: "⛓️‍💥总线-入",', 'wirelessPackTitle: "总线-入",')
+          replace_once("web/wire_bus.js", 'wirelessUnpackTitle: "⛓️‍💥总线-出",', 'wirelessUnpackTitle: "总线-出",')
+          replace_once(
+              "web/wire_bus.js",
+              'wirelessPackDescription: "将多路连接发布到独立的 TerryXu 无线总线频道，不与 KJNodes Get/Set 混用。",',
+              'wirelessPackDescription: "汇总多路连接；既可从总线端口有线连出，也可通过 TerryXu 频道无线发布。",',
+          )
+          replace_once(
+              "web/wire_bus.js",
+              'wirelessUnpackDescription: "选择 TerryXu 无线总线频道，自动恢复对应的多路连接。",',
+              'wirelessUnpackDescription: "既可从总线端口有线接收，也可选择 TerryXu 频道无线接收，并自动恢复多路连接。",',
+          )
+          replace_once("web/wire_bus.js", 'wirelessPackTitle: "⛓️‍💥 Bus-In",', 'wirelessPackTitle: "Bus-In",')
+          replace_once("web/wire_bus.js", 'wirelessUnpackTitle: "⛓️‍💥 Bus-Out",', 'wirelessUnpackTitle: "Bus-Out",')
+          replace_once(
+              "web/wire_bus.js",
+              'wirelessPackDescription: "Publish multiple connections to an independent TerryXu wireless bus channel.",',
+              'wirelessPackDescription: "Bundle multiple connections and expose them through both a wired BUS output and a TerryXu wireless channel.",',
+          )
+          replace_once(
+              "web/wire_bus.js",
+              'wirelessUnpackDescription: "Select a TerryXu wireless bus channel and restore all of its connections.",',
+              'wirelessUnpackDescription: "Restore a bus from either the wired BUS input or a TerryXu wireless channel.",',
+          )
+
+          merged_find_pack = r'''function findPackFromUnpack(unpack) {
+            if (isWirelessUnpack(unpack)) {
+              const linkId = unpack?.inputs?.[0]?.link;
+              if (unpack?.graph && linkId != null) {
+                const upstream = resolveUpstream(unpack.graph, linkId);
+                if (upstream && isWirelessPack(upstream.node)) return upstream.node;
+              }
+              const name = wirelessChannelName(unpack);
+              if (!name) return null;
+              return wirelessPacksInScope(unpack.graph || app.graph)
+                .find((node) => wirelessChannelName(node) === name) || null;
+            }
+            if (!isWiredUnpack(unpack)) return null;
+            const linkId = unpack?.inputs?.[0]?.link;
+            if (!unpack?.graph || linkId == null) return null;
+            const upstream = resolveUpstream(unpack.graph, linkId);
+            return upstream && isWiredPack(upstream.node) ? upstream.node : null;
+          }'''
+          sub_once(
+              "web/wire_bus.js",
+              r"function findPackFromUnpack\(unpack\) \{.*?\n\}\n\nfunction nodeProperties",
+              merged_find_pack + "\n\nfunction nodeProperties",
+              re.S,
+          )
+
+          merged_localize = r'''function localizeFixedPorts(node, updateTitle = false) {
+            const text = labels();
+            if (isWiredPack(node)) {
+              const out = node.outputs?.[0];
+              if (out) {
+                out.name = "bus";
+                out.label = text.bus;
+                out.type = BUS_TYPE;
+              }
+              if (updateTitle) node.title = text.packTitle;
+            } else if (isWiredUnpack(node)) {
+              const input = node.inputs?.[0];
+              if (input) {
+                input.name = "bus";
+                input.label = text.bus;
+                input.type = BUS_TYPE;
+              }
+              if (updateTitle) node.title = text.unpackTitle;
+            } else if (isWirelessPack(node)) {
+              const out = node.outputs?.[0];
+              if (out) {
+                out.name = "bus";
+                out.label = text.bus;
+                out.type = BUS_TYPE;
+              }
+              const widget = wirelessChannelWidget(node);
+              if (widget) widget.name = text.channelName;
+              if (updateTitle) node.title = text.wirelessPackTitle;
+            } else if (isWirelessUnpack(node)) {
+              const input = node.inputs?.[0];
+              if (input) {
+                input.name = "bus";
+                input.label = text.bus;
+                input.type = BUS_TYPE;
+              }
+              const widget = wirelessChannelWidget(node);
+              if (widget) widget.name = text.channelSelect;
+              if (updateTitle) node.title = text.wirelessUnpackTitle;
+            }
+          }'''
+          sub_once(
+              "web/wire_bus.js",
+              r"function localizeFixedPorts\(node, updateTitle = false\) \{.*?\n\}\n\nfunction emptyLaneLabel",
+              merged_localize + "\n\nfunction emptyLaneLabel",
+              re.S,
+          )
+
+          merged_defs = r'''  addCustomNodeDefs(defs) {
+            const text = labels();
+            defs[WIRELESS_PACK_TYPE] = makeNodeDef(
+              WIRELESS_PACK_TYPE,
+              text.wirelessPackTitle,
+              text.wirelessPackDescription,
+              text.category,
+              { required: { wire: [EMPTY_TYPE, { label: text.addWire }] } },
+              [BUS_TYPE],
+              [text.bus]
+            );
+            defs[WIRELESS_UNPACK_TYPE] = makeNodeDef(
+              WIRELESS_UNPACK_TYPE,
+              text.wirelessUnpackTitle,
+              text.wirelessUnpackDescription,
+              text.category,
+              { required: { bus: [BUS_TYPE, { label: text.bus }] } },
+              [],
+              []
+            );
+          },'''
+          sub_once(
+              "web/wire_bus.js",
+              r"  addCustomNodeDefs\(defs\) \{.*?\n  \},\n\n  beforeRegisterNodeDef",
+              merged_defs + "\n\n  beforeRegisterNodeDef",
+              re.S,
+          )
+
+          replace_once(
+              "web/wire_bus.js",
+              '} else if (!isWirelessDef && type === LiteGraph.INPUT && index === 0) {',
+              '} else if (type === LiteGraph.INPUT && index === 0) {',
+          )
+
+          old_connect_block = r'''    if (isPackDef) {
+              nodeType.prototype.__terryBusLaneEntries = function () {
+                return effectivePackLaneEntries(this);
+              };
+              nodeType.prototype.onConnectInput = function (slot, type, output, originNode) {
+                if (slot < 0) return false;
+                if (!isWirelessDef) return type !== BUS_TYPE;
+
+                const connectedBus = (this.inputs || []).findIndex((input) =>
+                  input?.link != null && input.type === BUS_TYPE
+                );
+                if (connectedBus >= 0) return slot === connectedBus && type === BUS_TYPE;
+                if (type !== BUS_TYPE) return true;
+                if (!isWiredPack(originNode) && !isReroute(originNode) && !isGet(originNode)) return false;
+                return !(this.inputs || []).some((input, index) => index !== slot && input?.link != null);
+              };
+              if (!isWirelessDef) {
+                nodeType.prototype.onConnectOutput = function (slot, type, input, targetNode) {
+                  return slot === 0 && (
+                    isWiredUnpack(targetNode)
+                    || isWirelessPack(targetNode)
+                    || isReroute(targetNode)
+                    || isSet(targetNode)
+                  );
+                };
+              }
+            } else if (!isWirelessDef) {
+              nodeType.prototype.onConnectInput = function (slot, type, output, originNode) {
+                return slot === 0 && (type === BUS_TYPE || isWiredPack(originNode) || isReroute(originNode) || isGet(originNode));
+              };
+            }'''
+          new_connect_block = r'''    if (isPackDef) {
+              nodeType.prototype.__terryBusLaneEntries = function () {
+                return effectivePackLaneEntries(this);
+              };
+              nodeType.prototype.onConnectInput = function (slot, type) {
+                return slot >= 0 && type !== BUS_TYPE;
+              };
+              nodeType.prototype.onConnectOutput = function (slot, type, input, targetNode) {
+                return slot === 0 && (
+                  isWirelessUnpack(targetNode)
+                  || isReroute(targetNode)
+                  || isSet(targetNode)
+                );
+              };
+            } else {
+              nodeType.prototype.onConnectInput = function (slot, type, output, originNode) {
+                return slot === 0 && (
+                  type === BUS_TYPE
+                  || isWirelessPack(originNode)
+                  || isReroute(originNode)
+                  || isGet(originNode)
+                );
+              };
+            }'''
+          replace_once("web/wire_bus.js", old_connect_block, new_connect_block)
+
+          # Bus visual: the merged wireless nodes now own the fixed BUS output/input.
+          replace_once(
+              "web/wire_bus_visual.js",
+              'return type === BUS_TYPE || nodeType(origin) === PACK_TYPE;',
+              'return type === BUS_TYPE || nodeType(origin) === PACK_TYPE || nodeType(origin) === WIRELESS_PACK_TYPE;',
+          )
+          replace_once(
+              "web/wire_bus_visual.js",
+              'if (nodeType(node) === PACK_TYPE) return { node, graph };',
+              'if (nodeType(node) === PACK_TYPE || nodeType(node) === WIRELESS_PACK_TYPE) return { node, graph };',
+          )
+          replace_once(
+              "web/wire_bus_visual.js",
+              '        phantomOutputRows.push(`${expandedRoot} .lg-slot--output`);',
+              '        packRows.push(`${expandedRoot} .lg-slot--output`);\n        packs.push(`${expandedRoot} .lg-slot--output [data-testid="slot-connection-dot"]`);',
+          )
+          replace_once(
+              "web/wire_bus_visual.js",
+              '      } else if (type === WIRELESS_UNPACK_TYPE) {\n        for (let slot = 0; slot < (node.outputs?.length || 0); slot++) {',
+              '      } else if (type === WIRELESS_UNPACK_TYPE) {\n        unpackRows.push(`${expandedRoot} .lg-slot--input`);\n        unpacks.push(`${expandedRoot} .lg-slot--input [data-testid="slot-connection-dot"]`);\n        for (let slot = 0; slot < (node.outputs?.length || 0); slot++) {',
+          )
+          replace_once(
+              "web/wire_bus_visual.js",
+              '      (nodeType(this) === UNPACK_TYPE && Number(slot) === 0)\n      || (nodeType(this) === WIRELESS_PACK_TYPE && this.inputs?.length === 1 && this.inputs?.[slot]?.type === BUS_TYPE)',
+              '      ((nodeType(this) === UNPACK_TYPE || nodeType(this) === WIRELESS_UNPACK_TYPE) && Number(slot) === 0)',
+          )
+          replace_once(
+              "web/wire_bus_visual.js",
+              '      (nodeType(this) === PACK_TYPE && Number(slot) === 0)\n      || (nodeType(this) === WIRELESS_UNPACK_TYPE && this.outputs?.length === 1 && this.outputs?.[slot]?.type === BUS_TYPE)',
+              '      ((nodeType(this) === PACK_TYPE || nodeType(this) === WIRELESS_PACK_TYPE) && Number(slot) === 0)',
+          )
+          old_foreground = r'''      if (nodeType(this) === PACK_TYPE) drawCapsulePort(ctx, this, true, 0);
+                else if (nodeType(this) === UNPACK_TYPE) drawCapsulePort(ctx, this, false, 0);
+                else if (nodeType(this) === WIRELESS_PACK_TYPE) {
+                  for (let slot = 0; slot < (this.inputs?.length || 0); slot++) {
+                    const input = this.inputs[slot];
+                    if (input?.type === BUS_TYPE && input.link != null) {
+                      drawCapsulePort(ctx, this, false, slot);
+                    }
+                  }
+                } else if (nodeType(this) === WIRELESS_UNPACK_TYPE) {
+                  for (let slot = 0; slot < (this.outputs?.length || 0); slot++) {
+                    if (this.outputs[slot]?.type === BUS_TYPE) {
+                      drawCapsulePort(ctx, this, true, slot);
+                    }
+                  }
+                }'''
+          new_foreground = r'''      if (nodeType(this) === PACK_TYPE || nodeType(this) === WIRELESS_PACK_TYPE) {
+                  drawCapsulePort(ctx, this, true, 0);
+                } else if (nodeType(this) === UNPACK_TYPE || nodeType(this) === WIRELESS_UNPACK_TYPE) {
+                  drawCapsulePort(ctx, this, false, 0);
+                }'''
+          replace_once("web/wire_bus_visual.js", old_foreground, new_foreground)
+
+          # Named-port resolver: wired connection wins over wireless channel when present.
+          merged_named_find = r'''function findPackForUnpack(unpack) {
+            if (nodeType(unpack) === WIRELESS_UNPACK_TYPE) {
+              const physical = resolveSource(unpack?.graph, unpack?.inputs?.[0]?.link);
+              if (physical && nodeType(physical.node) === WIRELESS_PACK_TYPE) return physical.node;
+              const name = wirelessChannelName(unpack);
+              if (!name) return null;
+              for (const graph of [unpack.graph, app.graph]) {
+                const pack = (graph?._nodes || []).find((node) =>
+                  nodeType(node) === WIRELESS_PACK_TYPE && wirelessChannelName(node) === name
+                );
+                if (pack) return pack;
+              }
+              return null;
+            }
+            const source = resolveSource(unpack?.graph, unpack?.inputs?.[0]?.link);
+            return source && nodeType(source.node) === PACK_TYPE ? source.node : null;
+          }'''
+          sub_once(
+              "web/wire_bus_named_ports.js",
+              r"function findPackForUnpack\(unpack\) \{.*?\n\}\n\nfunction applyNames",
+              merged_named_find + "\n\nfunction applyNames",
+              re.S,
+          )
+
+          # H3 native BUS now comes from the merged wireless pack node.
+          replace_once(
+              "web/h3_bus_resolver.js",
+              'export const H3_BUS_PACK_TYPE = "TerryXuWireBusPack";',
+              'export const H3_BUS_PACK_TYPE = "TerryXuWirelessBusPack";',
+          )
+          replace_once(
+              "web/wire_bus_h3_output_compat.js",
+              'const PACK_TYPE = "TerryXuWireBusPack";',
+              'const PACK_TYPE = "TerryXuWirelessBusPack";',
+          )
+
+          # 4) Stabilize switches/remotes: one UI owner, event-driven refresh, no competing timers.
+          replace_once(
+              "web/line_switch.js",
+              '  node.graph?.setDirtyCanvas?.(true, true);\n}\n\nfunction refreshBool(node) {',
+              '  globalThis.__terrySyncSwitchUI?.(node);\n  node.graph?.setDirtyCanvas?.(true, true);\n}\n\nfunction refreshBool(node) {',
+          )
+          replace_once(
+              "web/line_switch.js",
+              '  node.graph?.setDirtyCanvas?.(true, true);\n}\n\nfunction refreshControllable(node) {',
+              '  globalThis.__terrySyncSwitchUI?.(node);\n  node.graph?.setDirtyCanvas?.(true, true);\n}\n\nfunction refreshControllable(node) {',
+          )
+          replace_once(
+              "web/line_switch.js",
+              '  properties(node)[REMOTE_VALUE_PROPERTY] = description?.value ?? properties(node)[REMOTE_VALUE_PROPERTY];\n  node.graph?.setDirtyCanvas?.(true, true);\n}\n\nfunction refreshAllRemotes() {',
+              '  properties(node)[REMOTE_VALUE_PROPERTY] = description?.value ?? properties(node)[REMOTE_VALUE_PROPERTY];\n  globalThis.__terrySyncSwitchUI?.(node);\n  node.graph?.setDirtyCanvas?.(true, true);\n}\n\nfunction refreshAllRemotes() {',
+          )
+          old_setup = r'''  setup() {
+              patchCanvas();
+              installExecutedListener();
+              startAnimation();
+              setInterval(() => {
+                patchCanvas();
+                for (const node of graphNodes()) {
+                  if (isLine(node)) refreshLine(node);
+                  else if (isBool(node)) refreshBool(node);
+                  else if (isRemote(node)) refreshRemote(node);
+                }
+              }, 500);
+            },'''
+          new_setup = r'''  setup() {
+              patchCanvas();
+              installExecutedListener();
+              startAnimation();
+            },'''
+          replace_once("web/line_switch.js", old_setup, new_setup)
+
+          old_switch_setup = r'''  setup() {
+              setInterval(() => {
+                for (const n of nodes()) {
+                  if (isLine(n)) syncLine(n);
+                  else if (isBool(n)) syncBool(n);
+                  else if (isRemote(n)) syncRemote(n);
+                }
+              }, 700);
+            },'''
+          new_switch_setup = r'''  setup() {
+              globalThis.__terrySyncSwitchUI = (node) => {
+                if (isLine(node)) syncLine(node);
+                else if (isBool(node)) syncBool(node);
+                else if (isRemote(node)) syncRemote(node);
+              };
+            },'''
+          replace_once("web/switch_ui.js", old_switch_setup, new_switch_setup)
+
+          # Remove the two superseded switch UI layers that were fighting switch_ui.js.
+          for path in ["web/switch_input_names.js", "web/switch_named_combo.js"]:
+              p = Path(path)
+              if p.exists():
+                  p.unlink()
+
+          # Remove this one-shot workflow from the final tree.
+          wf = Path(".github/workflows/terryxu-fix-current-20260906.yml")
+          if wf.exists():
+              wf.unlink()
+          try:
+              Path(".github/workflows").rmdir()
+              Path(".github").rmdir()
+          except OSError:
+              pass
+          PY
+
+      - name: Validate syntax and invariants
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          for path in Path('.').rglob('*.py'):
+              if '.git' in path.parts:
+                  continue
+              ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+
+          root = Path('__init__.py').read_text(encoding='utf-8')
+          nodes = Path('nodes/__init__.py').read_text(encoding='utf-8')
+          assert 'H3ShotTimeline' not in root
+          assert 'H3ShotTimeline' not in nodes
+
+          h3 = Path('web/h3_shared_menus.js').read_text(encoding='utf-8')
+          menu = h3.split('function openAssetMenu(controller) {', 1)[1].split('function nextSpeaker', 1)[0]
+          assert '可见主体' not in menu and '新建主体' not in menu and '已建立引用' not in menu
+          assert '仅显示已连接的图片、视频和音频' in menu
+
+          bus = Path('web/wire_bus.js').read_text(encoding='utf-8')
+          assert 'defs[PACK_TYPE]' not in bus
+          assert 'defs[UNPACK_TYPE]' not in bus
+          assert 'defs[WIRELESS_PACK_TYPE]' in bus and 'defs[WIRELESS_UNPACK_TYPE]' in bus
+          assert '{ required: { bus: [BUS_TYPE' in bus
+          assert '[BUS_TYPE],\n      [text.bus]' in bus
+
+          assert not Path('web/switch_input_names.js').exists()
+          assert not Path('web/switch_named_combo.js').exists()
+          line = Path('web/line_switch.js').read_text(encoding='utf-8')
+          sui = Path('web/switch_ui.js').read_text(encoding='utf-8')
+          assert '}, 500);' not in line
+          assert '}, 700);' not in sui
+          assert '__terrySyncSwitchUI' in line and '__terrySyncSwitchUI' in sui
+          PY
+
+          for f in web/*.js; do node --check "$f"; done
+
+      - name: Commit fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Fix H3, merged bus, and remote controls"
+          git push origin HEAD:main
