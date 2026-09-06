@@ -1,0 +1,190 @@
+name: TerryXu switch wire and H3 menu fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-switch-wire-and-h3-menu-20260906.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch UI
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # 1) Narrow the H3 @ asset menu now that long names ellipsize.
+          p = Path('web/h3_shared_menus.js')
+          t = p.read_text(encoding='utf-8')
+          t = t.replace('.terry-h3-role-menu{width:470px;', '.terry-h3-role-menu{width:360px;', 1)
+          t = t.replace('placeMenu(menu, editor, 430, 520);', 'placeMenu(menu, editor, 360, 520);', 1)
+          p.write_text(t, encoding='utf-8')
+
+          # 2) Replace native active input wire with our own subtle highlighted wire.
+          p = Path('web/switch_ui.js')
+          t = p.read_text(encoding='utf-8')
+
+          marker = 'function installSwitchHighlightStyles() {'
+          if 'function patchSwitchActiveWireCanvas()' not in t:
+              helper = r'''
+function graphLinkList(graph) {
+  const bag = graph?.links || graph?._links;
+  if (!bag) return [];
+  if (typeof bag.values === "function") return [...bag.values()];
+  return Object.values(bag).filter(Boolean);
+}
+
+function switchActiveInput(node) {
+  if (isLine(node)) return routes(node)[activeEntryIndex(node)] || null;
+  if (isBool(node)) return [input(node, "input_false"), input(node, "input_true")][activeEntryIndex(node)] || null;
+  return null;
+}
+
+function connectionPos(node, isInput, slotIndex) {
+  const modern = isInput ? node?.getInputPos?.(slotIndex) : node?.getOutputPos?.(slotIndex);
+  if (Array.isArray(modern) && Number.isFinite(modern[0])) return modern;
+  const out = [0, 0];
+  try {
+    const result = node?.getConnectionPos?.(isInput, slotIndex, out);
+    if (Array.isArray(result) && Number.isFinite(result[0])) return result;
+  } catch {}
+  return out;
+}
+
+function prepareSwitchActiveWires(canvas) {
+  const graph = canvas?.graph || app.graph;
+  if (!graph) return [];
+  const activeIds = new Set();
+  const result = [];
+
+  for (const node of graph?._nodes || graph?.nodes || []) {
+    if (!isLine(node) && !isBool(node)) continue;
+    const slot = switchActiveInput(node);
+    if (!slot || slot.link == null) continue;
+    const link = getLink(graph, slot.link);
+    if (!link) continue;
+    const linkId = link.id ?? slot.link;
+    activeIds.add(String(linkId));
+
+    if (!Object.prototype.hasOwnProperty.call(link, "__terrySwitchOriginalColor")) {
+      link.__terrySwitchOriginalColor = link.color;
+    }
+    link.color = "rgba(0,0,0,0)";
+
+    const originId = link.origin_id ?? link.originId;
+    const originSlot = Number(link.origin_slot ?? link.originSlot ?? 0) || 0;
+    const targetSlot = (node.inputs || []).indexOf(slot);
+    const origin = getNode(graph, originId);
+    if (!origin || targetSlot < 0) continue;
+    result.push({
+      start: connectionPos(origin, false, originSlot),
+      end: connectionPos(node, true, targetSlot),
+    });
+  }
+
+  for (const link of graphLinkList(graph)) {
+    if (!Object.prototype.hasOwnProperty.call(link, "__terrySwitchOriginalColor")) continue;
+    const id = String(link.id ?? "");
+    if (activeIds.has(id)) continue;
+    const original = link.__terrySwitchOriginalColor;
+    if (original == null || original === "") delete link.color;
+    else link.color = original;
+    delete link.__terrySwitchOriginalColor;
+  }
+  return result;
+}
+
+function drawSwitchActiveWires(canvas, ctx, wires) {
+  if (!ctx || !wires?.length) return;
+  const width = Math.max(2.5, Number(canvas?.connections_width) || 3);
+  for (const wire of wires) {
+    const [x1, y1] = wire.start || [];
+    const [x2, y2] = wire.end || [];
+    if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+    const bend = Math.max(50, Math.min(180, Math.abs(x2 - x1) * 0.5));
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.bezierCurveTo(x1 + bend, y1, x2 - bend, y2, x2, y2);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(216,189,103,.18)";
+    ctx.lineWidth = width + 5;
+    ctx.stroke();
+    ctx.strokeStyle = "#d8bd67";
+    ctx.lineWidth = width + 0.8;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function patchSwitchActiveWireCanvas() {
+  const canvas = app.canvas;
+  if (!canvas || canvas.__terrySwitchActiveWirePatched || typeof canvas.drawConnections !== "function") return;
+  canvas.__terrySwitchActiveWirePatched = true;
+  const old = canvas.drawConnections;
+  canvas.drawConnections = function(ctx) {
+    const wires = prepareSwitchActiveWires(this);
+    const result = old.apply(this, arguments);
+    drawSwitchActiveWires(this, ctx || this.bgctx || this.ctx, wires);
+    return result;
+  };
+}
+
+'''
+              if marker not in t:
+                  raise RuntimeError('switch highlight style marker not found')
+              t = t.replace(marker, helper + marker, 1)
+
+          # Hook canvas patch into setup, while keeping the existing subtle input-row cue.
+          if 'patchSwitchActiveWireCanvas();' not in t:
+              needle = 'installSwitchHighlightStyles();\n'
+              if needle not in t:
+                  raise RuntimeError('setup style hook not found')
+              t = t.replace(needle, needle + '        patchSwitchActiveWireCanvas();\n', 1)
+
+          # Re-apply after graph load in case canvas was recreated by Nodes 2.0.
+          aft = '  afterConfigureGraph() {\n'
+          if 'afterConfigureGraph() {\n    patchSwitchActiveWireCanvas();' not in t:
+              if aft not in t:
+                  raise RuntimeError('afterConfigureGraph hook not found')
+              t = t.replace(aft, aft + '    patchSwitchActiveWireCanvas();\n', 1)
+
+          p.write_text(t, encoding='utf-8')
+
+          wf = Path('.github/workflows/terryxu-switch-wire-and-h3-menu-20260906.yml')
+          if wf.exists(): wf.unlink()
+          for folder in (Path('.github/workflows'), Path('.github')):
+              try: folder.rmdir()
+              except OSError: pass
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          node --check web/h3_shared_menus.js
+          node --check web/switch_ui.js
+          grep -q 'width:360px' web/h3_shared_menus.js
+          grep -q 'placeMenu(menu, editor, 360, 520)' web/h3_shared_menus.js
+          grep -q 'function patchSwitchActiveWireCanvas' web/switch_ui.js
+          grep -q 'rgba(0,0,0,0)' web/switch_ui.js
+          grep -q 'drawSwitchActiveWires' web/switch_ui.js
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Redraw selected switch wires and narrow H3 menu"
+          git push origin main
