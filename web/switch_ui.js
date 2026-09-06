@@ -162,22 +162,44 @@ function nodes2Root(node) {
   return [...document.querySelectorAll("[data-node-id]")]
     .find((element) => String(element.getAttribute("data-node-id")) === String(node?.id)) || null;
 }
+function activeEntryIndex(node) {
+  if (isLine(node)) return Math.max(0, numericIndex(node) - 1);
+  if (isBool(node)) return boolState(node) ? 1 : 0;
+  return -1;
+}
+
 function syncNodes2InputLabels(node) {
   const root = nodes2Root(node);
   if (!root) return;
   const rows = [...root.querySelectorAll(".lg-slot--input")]
     .filter((row) => String(row.textContent || "").includes("✎"));
   const entries = renameEntries(node);
+  const activeIndex = activeEntryIndex(node);
   rows.forEach((row, index) => {
     const entry = entries[index];
     const span = row.querySelector(".text-node-component-slot-text");
     if (entry && span) span.textContent = `${entry.label}   ✎`;
+    row.classList.toggle("terry-switch-active-route", index === activeIndex);
+  });
+}
+function markClassicActiveSlots(node, entries, activeIndex) {
+  entries.forEach((slot, index) => {
+    if (!slot) return;
+    if (index === activeIndex) {
+      slot.color_on = "#d8bd67";
+      slot.color_off = "#9f8a4c";
+    } else {
+      delete slot.color_on;
+      delete slot.color_off;
+    }
   });
 }
 function syncLineLabels(node) {
-  routes(node).forEach((slot, i) => {
+  const slots = routes(node);
+  slots.forEach((slot, i) => {
     slot.label = `${routeName(node, slot, i)}   ✎`;
   });
+  markClassicActiveSlots(node, slots, activeEntryIndex(node));
   queueMicrotask(() => syncNodes2InputLabels(node));
 }
 function syncBoolLabels(node) {
@@ -185,6 +207,7 @@ function syncBoolLabels(node) {
   const on = input(node, "input_true");
   if (off) off.label = `${boolName(node, false)}   ✎`;
   if (on) on.label = `${boolName(node, true)}   ✎`;
+  markClassicActiveSlots(node, [off, on], activeEntryIndex(node));
   queueMicrotask(() => syncNodes2InputLabels(node));
 }
 function syncLine(node) { if (!isLine(node)) return; hideNativeIndex(node); syncLineLabels(node); ensureRouteMenu(node); }
@@ -239,6 +262,23 @@ function tryRename(node, event, pos) {
     return true;
   }
   return false;
+}
+
+function installSwitchHighlightStyles() {
+  if (typeof document === "undefined" || document.getElementById("terry-switch-active-route-style")) return;
+  const style = document.createElement("style");
+  style.id = "terry-switch-active-route-style";
+  style.textContent = `
+.lg-slot--input.terry-switch-active-route{
+  background:rgba(216,189,103,.075);
+  box-shadow:inset 2px 0 0 rgba(216,189,103,.58);
+  border-radius:4px;
+}
+.lg-slot--input.terry-switch-active-route .text-node-component-slot-text{
+  color:rgba(246,238,207,.96);
+}
+`;
+  document.head.append(style);
 }
 
 function installNodes2RenameHandler() {
@@ -355,6 +395,7 @@ app.registerExtension({
     queueMicrotask(() => { if (isLine(node)) syncLine(node); else if (isBool(node)) syncBool(node); else if (isRemote(node)) syncRemote(node); });
   },
   setup() {
+        installSwitchHighlightStyles();
         installNodes2RenameHandler();
         globalThis.__terrySyncSwitchUI = (node) => {
           if (isLine(node)) syncLine(node);
