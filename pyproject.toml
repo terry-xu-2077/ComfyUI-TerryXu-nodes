@@ -1,0 +1,10 @@
+[project]
+name = "comfyui-terryxu-nodes"
+version = "0.3.1"
+description = "TerryXu's personal ComfyUI tools."
+requires-python = ">=3.10"
+
+[tool.comfy]
+PublisherId = "terryxu"
+DisplayName = "TerryXu"
+Icon = ""
