@@ -1,0 +1,38 @@
+name: H3 menu filename width
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/h3-menu-filename-width.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make filename truncation follow menu width
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('web/h3_shared_menus.js')
+          s = p.read_text(encoding='utf-8')
+          old = '.terry-h3-role-row .terry-h3-role-info b{max-width:52%}'
+          new = '.terry-h3-role-row .terry-h3-role-info b{width:100%;max-width:none}'
+          if old not in s:
+              raise SystemExit('filename width rule not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          Path('.github/workflows/h3-menu-filename-width.yml').unlink()
+          PY
+      - name: Validate
+        run: |
+          node --check web/h3_shared_menus.js
+          grep -q '.terry-h3-role-row .terry-h3-role-info b{width:100%;max-width:none}' web/h3_shared_menus.js
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make H3 filename truncation follow menu width"
+          git push
