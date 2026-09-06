@@ -209,7 +209,7 @@ function lightenLinkColor(color, whiteMix = 0.48) {
 function drawHighlightedLink(ctx, start, end, color, baseWidth) {
   if (!ctx) return;
   const width = Math.max(2.5, Number(baseWidth) || 3);
-  const bright = lightenLinkColor(color, 0.76);
+  const bright = lightenLinkColor(color, 0.90);
 
   ctx.save();
   ctx.lineCap = "round";
@@ -220,7 +220,7 @@ function drawHighlightedLink(ctx, start, end, color, baseWidth) {
   if (makeLinkPath(ctx, start, end)) {
     ctx.strokeStyle = color;
     ctx.globalAlpha = 0.96;
-    ctx.lineWidth = width + 2.5;
+    ctx.lineWidth = (width + 2.5) * 1.3;
     ctx.stroke();
   }
 
