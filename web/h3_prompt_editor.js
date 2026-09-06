@@ -16,6 +16,22 @@ const VIEW_PROP = "terry_h3_view_mode";
 const VIEW_VISUAL = "visual";
 const VIEW_RAW = "raw";
 const MAX_MEDIA = 32;
+const DEFAULT_NODE_TITLE = "📃 H3提示词编辑器";
+const LEGACY_DEFAULT_NODE_TITLES = new Set([
+  "TerryXu H3 提示词编辑器",
+  "TerryXu | H3 提示词编辑器",
+  "H3 提示词编辑器",
+  "H3提示词编辑器",
+]);
+
+function syncDefaultNodeTitle(node, force = false) {
+  if (!node) return;
+  const current = String(node.title || "").trim();
+  if (force || !current || LEGACY_DEFAULT_NODE_TITLES.has(current)) {
+    node.title = DEFAULT_NODE_TITLE;
+  }
+}
+
 function isTarget(node) {
   if (!node) return false;
   return [node.comfyClass, node.type, node.constructor?.type, node.constructor?.comfyClass, node.constructor?.nodeData?.name]
@@ -550,17 +566,20 @@ function installNode(nodeType, nodeData) {
   const created = nodeType.prototype.onNodeCreated;
   nodeType.prototype.onNodeCreated = function() {
     const r = created?.apply(this, arguments);
+    syncDefaultNodeTitle(this, true);
     ensureLinks(this); ensureSingleMediaInput(this); installEditorSoon(this); patchCanvas(); patchGraphToPrompt();
     return r;
   };
   const added = nodeType.prototype.onAdded;
   nodeType.prototype.onAdded = function() {
     const r = added?.apply(this, arguments);
+    syncDefaultNodeTitle(this);
     ensureLinks(this); ensureSingleMediaInput(this); installEditorSoon(this); return r;
   };
   const configure = nodeType.prototype.onConfigure;
   nodeType.prototype.onConfigure = function(info) {
     const r = configure?.apply(this, arguments);
+    syncDefaultNodeTitle(this);
     ensureLinks(this); normalizeLinks(this); ensureSingleMediaInput(this); installEditorSoon(this); refreshEditorsSoon(); return r;
   };
   const connections = nodeType.prototype.onConnectionsChange;
