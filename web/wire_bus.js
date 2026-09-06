@@ -49,10 +49,10 @@ function isChineseLocale() {
 function labels() {
   if (isChineseLocale()) {
     return {
-      packTitle: "🛝 总线-入",
-      unpackTitle: "🛝 总线-出",
-      wirelessPackTitle: "🛝 总线-入",
-      wirelessUnpackTitle: "🛝 总线-出",
+      packTitle: "↔️ 总线-入",
+      unpackTitle: "↔️ 总线-出",
+      wirelessPackTitle: "↔️ 总线-入",
+      wirelessUnpackTitle: "↔️ 总线-出",
       packDescription: "将任意数量、任意类型的连接汇总为一根虚拟总线，支持 KJNodes Get/Set。",
       unpackDescription: "从虚拟总线自动恢复原始连接的数量、类型和顺序，支持 KJNodes Get/Set。",
       wirelessPackDescription: "汇总多路连接；既可从总线端口有线连出，也可通过 TerryXu 频道无线发布。",
@@ -68,10 +68,10 @@ function labels() {
     };
   }
   return {
-    packTitle: "🛝 Bus-In",
-    unpackTitle: "🛝 Bus-Out",
-    wirelessPackTitle: "🛝 Bus-In",
-    wirelessUnpackTitle: "🛝 Bus-Out",
+    packTitle: "↔️ Bus-In",
+    unpackTitle: "↔️ Bus-Out",
+    wirelessPackTitle: "↔️ Bus-In",
+    wirelessUnpackTitle: "↔️ Bus-Out",
     packDescription: "Bundle any number of connections into one virtual bus. Supports KJNodes Get/Set.",
     unpackDescription: "Restore the original connection count, types and order from a virtual bus. Supports KJNodes Get/Set.",
     wirelessPackDescription: "Bundle multiple connections and expose them through both a wired BUS output and a TerryXu wireless channel.",
