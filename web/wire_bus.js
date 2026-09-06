@@ -49,8 +49,8 @@ function isChineseLocale() {
 function labels() {
   if (isChineseLocale()) {
     return {
-      packTitle: "🔗总线-入",
-      unpackTitle: "🔗总线-出",
+      packTitle: "总线-入",
+      unpackTitle: "总线-出",
       wirelessPackTitle: "总线-入",
       wirelessUnpackTitle: "总线-出",
       packDescription: "将任意数量、任意类型的连接汇总为一根虚拟总线，支持 KJNodes Get/Set。",
@@ -68,8 +68,8 @@ function labels() {
     };
   }
   return {
-    packTitle: "🔗 Bus-In",
-    unpackTitle: "🔗 Bus-Out",
+    packTitle: " Bus-In",
+    unpackTitle: " Bus-Out",
     wirelessPackTitle: "Bus-In",
     wirelessUnpackTitle: "Bus-Out",
     packDescription: "Bundle any number of connections into one virtual bus. Supports KJNodes Get/Set.",

@@ -20,8 +20,8 @@ function localeCode() {
 function isZh() { const l = localeCode(); return l === "zh" || l.startsWith("zh-"); }
 function labels() {
   return isZh()
-    ? { route: "线路", off: "关闭", on: "开启", rename: "重命名线路" }
-    : { route: "Route", off: "Off", on: "On", rename: "Rename route" };
+    ? { route: "线路", input1: "线路 1", input2: "线路 2", rename: "重命名线路" }
+    : { route: "Route", input1: "Input 1", input2: "Input 2", rename: "Rename route" };
 }
 function nodeType(node) { return String(node?.comfyClass || node?.type || node?.constructor?.comfyClass || node?.constructor?.type || ""); }
 function isLine(node) { return nodeType(node) === LINE_TYPE; }
@@ -51,7 +51,7 @@ function routeName(node, slot, index) {
   return String(lineNames(node)[routeKey(slot, index)] || "").trim() || `${labels().route} ${index + 1}`;
 }
 function boolName(node, enabled) {
-  return String(boolNames(node)[enabled ? "true" : "false"] || "").trim() || (enabled ? labels().on : labels().off);
+  return String(boolNames(node)[enabled ? "true" : "false"] || "").trim() || (enabled ? labels().input2 : labels().input1);
 }
 function clampIndex(value, count) {
   const parsed = Number.parseInt(value, 10);
@@ -199,6 +199,35 @@ function tryRename(node, event, pos) {
   return false;
 }
 
+function installNodes2RenameHandler() {
+  if (typeof document === "undefined" || globalThis.__terrySwitchNodes2RenameHandler) return;
+  globalThis.__terrySwitchNodes2RenameHandler = true;
+  document.addEventListener("pointerdown", (event) => {
+    if (event.button != null && event.button !== 0) return;
+    const target = event.target;
+    if (!target?.closest) return;
+    if (target.closest('[data-testid="slot-connection-dot"], [data-testid="slot-dot"]')) return;
+    const row = target.closest(".lg-slot--input");
+    const root = row?.closest?.("[data-node-id]");
+    if (!row || !root || !String(row.textContent || "").includes("✎")) return;
+    const id = root.getAttribute("data-node-id");
+    const node = nodes().find((item) => String(item?.id) === String(id));
+    if (!node || (!isLine(node) && !isBool(node))) return;
+    const editableRows = [...root.querySelectorAll(".lg-slot--input")].filter((item) => String(item.textContent || "").includes("✎"));
+    const entry = renameEntries(node)[editableRows.indexOf(row)];
+    if (!entry) return;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    const next = globalThis.prompt?.(labels().rename, entry.label);
+    if (next == null) return;
+    entry.set(next);
+    if (isLine(node)) syncLine(node); else syncBool(node);
+    syncRemotes();
+    node.graph?.setDirtyCanvas?.(true, true);
+    node.graph?.change?.();
+  }, true);
+}
+
 function allGraphs(root = app.graph) {
   const result = [], seen = new Set(), q = root ? [root] : [];
   while (q.length) {
@@ -277,6 +306,7 @@ app.registerExtension({
     queueMicrotask(() => { if (isLine(node)) syncLine(node); else if (isBool(node)) syncBool(node); else if (isRemote(node)) syncRemote(node); });
   },
   setup() {
+        installNodes2RenameHandler();
         globalThis.__terrySyncSwitchUI = (node) => {
           if (isLine(node)) syncLine(node);
           else if (isBool(node)) syncBool(node);

@@ -58,23 +58,23 @@
     "outputs": {"0": {"name": "H3 Prompt"}}
   },
   "TerryXuWireBusPack": {
-    "display_name": "🔗总线-入",
+    "display_name": "总线-入",
     "description": "将任意数量、任意类型的连接汇总为一根虚拟总线，支持 KJNodes Get/Set。",
     "inputs": {"wire": {"name": "添加线束"}},
     "outputs": {"0": {"name": "总线"}}
   },
   "TerryXuWireBusUnpack": {
-    "display_name": "🔗总线-出",
+    "display_name": "总线-出",
     "description": "从虚拟总线自动恢复原始连接的数量、类型和顺序，支持 KJNodes Get/Set。",
     "inputs": {"bus": {"name": "总线"}}
   },
   "TerryXuWirelessBusPack": {
-    "display_name": "⛓️‍💥总线-入",
+    "display_name": "总线-入",
     "description": "将多路连接发布到独立的 TerryXu 无线总线频道，不与 KJNodes Get/Set 混用。",
     "inputs": {"wire": {"name": "添加线束"}}
   },
   "TerryXuWirelessBusUnpack": {
-    "display_name": "⛓️‍💥总线-出",
+    "display_name": "总线-出",
     "description": "选择 TerryXu 无线总线频道，自动恢复对应的多路连接。"
   }
 }

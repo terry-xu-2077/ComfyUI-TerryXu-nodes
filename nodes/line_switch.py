@@ -22,7 +22,7 @@ class LineSwitch(io.ComfyNode):
         )
         return io.Schema(
             node_id="TerryXuLineSwitch",
-            display_name="TerryXu 线路切换器",
+            display_name="线路切换器",
             category="TerryXu/线束整理",
             description="在任意数量的同类型线路之间切换；序号可手动选择，也可连接 INT 控制。",
             inputs=[

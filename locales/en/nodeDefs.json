@@ -58,23 +58,23 @@
     "outputs": {"0": {"name": "H3 Prompt"}}
   },
   "TerryXuWireBusPack": {
-    "display_name": "🔗 Bus-In",
+    "display_name": " Bus-In",
     "description": "Bundle any number of connections into one virtual bus. Supports KJNodes Get/Set.",
     "inputs": {"wire": {"name": "Add Wire"}},
     "outputs": {"0": {"name": "Bus"}}
   },
   "TerryXuWireBusUnpack": {
-    "display_name": "🔗 Bus-Out",
+    "display_name": " Bus-Out",
     "description": "Restore the original connection count, types and order from a virtual bus. Supports KJNodes Get/Set.",
     "inputs": {"bus": {"name": "Bus"}}
   },
   "TerryXuWirelessBusPack": {
-    "display_name": "⛓️‍💥 Bus-In",
+    "display_name": " Bus-In",
     "description": "Publish multiple connections to an independent TerryXu wireless bus channel.",
     "inputs": {"wire": {"name": "Add Wire"}}
   },
   "TerryXuWirelessBusUnpack": {
-    "display_name": "⛓️‍💥 Bus-Out",
+    "display_name": " Bus-Out",
     "description": "Select a TerryXu wireless bus channel and restore all of its connections."
   }
 }

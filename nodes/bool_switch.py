@@ -9,9 +9,9 @@ class BoolSwitch(io.ComfyNode):
         value_type = io.MatchType.Template("terry_bool_switch_value")
         return io.Schema(
             node_id="TerryXuBoolSwitch",
-            display_name="TerryXu 二路布尔切换器",
+            display_name="二路切换器",
             category="TerryXu/线束整理",
-            description="使用布尔值在两路任意同类型输入之间切换，可通过 TerryXu 远程控制器按频道控制。",
+            description="使用布尔值在两路任意同类型输入之间切换，可通过远程控制器按名称控制。",
             inputs=[
                 io.Boolean.Input(
                     "enabled",
@@ -22,13 +22,13 @@ class BoolSwitch(io.ComfyNode):
                 io.MatchType.Input(
                     "input_false",
                     template=value_type,
-                    display_name="关闭",
+                    display_name="线路 1",
                     lazy=True,
                 ),
                 io.MatchType.Input(
                     "input_true",
                     template=value_type,
-                    display_name="开启",
+                    display_name="线路 2",
                     lazy=True,
                 ),
             ],
