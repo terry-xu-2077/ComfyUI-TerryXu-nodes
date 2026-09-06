@@ -28,7 +28,7 @@ class DateFormatter(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TerryXuDateFormatter",
-            display_name="TerryXu 日期格式化",
+            display_name="日期格式化",
             category="TerryXu/Utils",
             description=(
                 "将当前日期/时间按指定格式写入文本中的 %date%。"

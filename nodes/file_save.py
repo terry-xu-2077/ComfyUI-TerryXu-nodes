@@ -27,7 +27,7 @@ def _detect_type(data: Any) -> str:
     if hasattr(data, "save_to") and hasattr(data, "get_dimensions"):
         return "video"
     raise TypeError(
-        "TerryXu 文件保存：当前仅支持 VIDEO / STRING / IMAGE / AUDIO。"
+        "文件保存：当前仅支持 VIDEO / STRING / IMAGE / AUDIO。"
         f" 实际收到：{type(data).__module__}.{type(data).__name__}"
     )
 
@@ -65,7 +65,7 @@ def _target_path(rel_stem: str, extension: str) -> tuple[str, str, str]:
     output_dir = Path(folder_paths.get_output_directory()).resolve()
     target = (output_dir / rel).resolve()
     if output_dir not in target.parents and target != output_dir:
-        raise ValueError("TerryXu 文件保存：输出路径越界。")
+        raise ValueError("文件保存：输出路径越界。")
     target.parent.mkdir(parents=True, exist_ok=True)
     subfolder = str(rel.parent).replace("\\", "/")
     if subfolder == ".":
@@ -98,7 +98,7 @@ class FileSave(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TerryXuFileSave",
-            display_name="TerryXu 文件保存",
+            display_name="文件保存",
             category="TerryXu/Save",
             description=(
                 "按输入的精确文件名保存 VIDEO / STRING / IMAGE / AUDIO。"

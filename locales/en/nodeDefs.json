@@ -1,6 +1,6 @@
 {
   "TerryXuFileSave": {
-    "display_name": "TerryXu File Save",
+    "display_name": "File Save",
     "description": "Save VIDEO / STRING / IMAGE / AUDIO from one input with type-aware controls, internal or external filenames, and an optional sequence suffix.",
     "inputs": {
       "data": {
@@ -47,7 +47,7 @@
     }
   },
   "TerryXuDateFormatter": {
-    "display_name": "TerryXu Date Formatter",
+    "display_name": "Date Formatter",
     "inputs": {
       "template": {
         "name": "Text template"
@@ -63,7 +63,7 @@
     }
   },
   "TerryXuVideoCompare": {
-    "display_name": "TerryXu Video Compare",
+    "display_name": "Video Compare",
     "description": "A/B synchronized video comparison preview. Drag the center divider to inspect differences; the bottom timeline controls both videos together.",
     "inputs": {
       "a": {
@@ -109,8 +109,8 @@
     }
   },
   "TerryXuH3ShotTimeline": {
-    "display_name": "TerryXu H3 Prompt Editor (Timeline)",
-    "description": "Timeline mode of TerryXu H3 Prompt Editor with multi-reference assets, tagged shot descriptions, shot ordering and duration editing, plus optional soundscape/music fields.",
+    "display_name": "📃 H3 Prompt Editor (Timeline)",
+    "description": "Timeline mode of H3 Prompt Editor with multi-reference assets, tagged shot descriptions, shot ordering and duration editing, plus optional soundscape/music fields.",
     "inputs": {
       "compiled_prompt": {
         "name": "H3 Timeline Source"

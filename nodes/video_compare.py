@@ -20,7 +20,7 @@ class VideoCompare(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="TerryXuVideoCompare",
-            display_name="TerryXu | 视频对比",
+            display_name="视频对比",
             category="TerryXu/Video",
             description=(
                 "A/B 双路视频同步对比预览。拖动中间分割线观察画面差异；"

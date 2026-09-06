@@ -1,6 +1,6 @@
 {
   "TerryXuFileSave": {
-    "display_name": "TerryXu 文件保存",
+    "display_name": "文件保存",
     "description": "一个输入端接收 VIDEO / STRING / IMAGE / AUDIO，按真实输入类型自动显示保存参数，并支持内部或外部文件名以及可选尾部序号。",
     "inputs": {
       "data": {
@@ -47,7 +47,7 @@
     }
   },
   "TerryXuDateFormatter": {
-    "display_name": "TerryXu 日期格式化",
+    "display_name": "日期格式化",
     "inputs": {
       "template": {
         "name": "文本模板"
@@ -63,7 +63,7 @@
     }
   },
   "TerryXuVideoCompare": {
-    "display_name": "TerryXu 视频对比",
+    "display_name": "视频对比",
     "description": "A/B 双路视频同步对比预览。拖动中间分割线观察画面差异；底部时间轴同步控制两路视频。",
     "inputs": {
       "a": {
@@ -109,8 +109,8 @@
     }
   },
   "TerryXuH3ShotTimeline": {
-    "display_name": "TerryXu H3 提示词编辑器（时间轴）",
-    "description": "TerryXu H3 提示词编辑器的时间轴模式：支持多路参考素材、标签化镜头描述、镜头增删/排序/拖动接缝调时长，以及可选 overall_soundscape / non_diegetic_music。",
+    "display_name": "📃 H3提示词编辑器（时间轴）",
+    "description": "H3 提示词编辑器的时间轴模式：支持多路参考素材、标签化镜头描述、镜头增删/排序/拖动接缝调时长，以及可选 overall_soundscape / non_diegetic_music。",
     "inputs": {
       "compiled_prompt": {
         "name": "H3 时间轴原文"

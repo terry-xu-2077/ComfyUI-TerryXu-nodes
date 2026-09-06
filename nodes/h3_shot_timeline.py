@@ -120,7 +120,7 @@ class H3ShotTimeline(io.ComfyNode):
 
         return io.Schema(
             node_id="TerryXuH3ShotTimeline",
-            display_name="TerryXu H3 Prompt Editor (Timeline)",
+            display_name="📃 H3 Prompt Editor (Timeline)",
             category="TerryXu/Text",
             search_aliases=[
                 "H3 prompt editor timeline",
@@ -130,7 +130,7 @@ class H3ShotTimeline(io.ComfyNode):
                 "detailed_description",
             ],
             description=(
-                "TerryXu H3 提示词编辑器的时间轴模式：支持多路参考素材、标签化镜头描述、"
+                "📃 H3提示词编辑器的时间轴模式：支持多路参考素材、标签化镜头描述、"
                 "镜头增删/排序/拖动接缝调时长，以及可选 overall_soundscape / non_diegetic_music。"
             ),
             inputs=[
