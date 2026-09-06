@@ -338,7 +338,7 @@ function openAssetMenu(controller) {
     empty.textContent = allAssets.length ? "没有匹配的参考资产。" : "还没有连接图片、视频或音频参考。";
     menu.append(empty);
   }
-  placeMenu(menu, editor, 430, 520);
+  placeMenu(menu, editor, 360, 520);
   return true;
 }
 
@@ -470,7 +470,7 @@ export function installH3MenuStyles() {
   const style = document.createElement("style"); style.id = "terry-h3-shared-menu-module-style";
   style.textContent = `
 .terry-h3-shared-module-menu{position:fixed!important;z-index:2147483000!important;isolation:isolate!important;pointer-events:auto!important;box-sizing:border-box;color:var(--input-text,#ddd);font-family:Inter,system-ui,sans-serif}
-.terry-h3-role-menu{width:470px;max-height:560px;overflow:auto;padding:10px;border:1px solid rgba(255,255,255,.14);border-radius:9px;background:var(--comfy-menu-bg,#17191c);box-shadow:0 18px 48px rgba(0,0,0,.52)}
+.terry-h3-role-menu{width:360px;max-height:560px;overflow:auto;padding:10px;border:1px solid rgba(255,255,255,.14);border-radius:9px;background:var(--comfy-menu-bg,#17191c);box-shadow:0 18px 48px rgba(0,0,0,.52)}
 .terry-h3-role-legend{padding:0 2px 10px;border-bottom:1px solid rgba(255,255,255,.10)}
 .terry-h3-role-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.terry-h3-role-title>b{font-size:13px}.terry-h3-role-title>span{font-size:10px;opacity:.5}
 .terry-h3-role-tabs{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.terry-h3-role-action{display:block;width:auto;min-height:28px;margin:5px 2px;padding:3px 9px;border:1px solid rgba(255,255,255,.13);border-radius:6px;background:rgba(255,255,255,.05);color:inherit;cursor:pointer;font-size:11px;white-space:nowrap}.terry-h3-role-tabs .terry-h3-role-action{display:inline-block;margin:0}.terry-h3-role-action.is-active{border-color:rgba(0,226,187,.38);background:rgba(0,226,187,.12);color:rgba(205,255,246,.98)}

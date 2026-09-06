@@ -264,6 +264,90 @@ function tryRename(node, event, pos) {
   return false;
 }
 
+function graphLinkList(graph) {
+  const bag = graph?.links || graph?._links;
+  if (!bag) return [];
+  if (typeof bag.values === "function") return [...bag.values()];
+  return Object.values(bag).filter(Boolean);
+}
+
+function switchActiveInput(node) {
+  if (isLine(node)) return routes(node)[activeEntryIndex(node)] || null;
+  if (isBool(node)) return [input(node, "input_false"), input(node, "input_true")][activeEntryIndex(node)] || null;
+  return null;
+}
+
+function connectionPos(node, isInput, slotIndex) {
+  const modern = isInput ? node?.getInputPos?.(slotIndex) : node?.getOutputPos?.(slotIndex);
+  if (Array.isArray(modern) && Number.isFinite(modern[0])) return modern;
+  const out = [0, 0];
+  try {
+    const result = node?.getConnectionPos?.(isInput, slotIndex, out);
+    if (Array.isArray(result) && Number.isFinite(result[0])) return result;
+  } catch {}
+  return out;
+}
+
+function prepareSwitchActiveWires(canvas) {
+  const graph = canvas?.graph || app.graph;
+  if (!graph) return [];
+  const activeIds = new Set();
+  const result = [];
+  for (const node of graph?._nodes || graph?.nodes || []) {
+    if (!isLine(node) && !isBool(node)) continue;
+    const slot = switchActiveInput(node);
+    if (!slot || slot.link == null) continue;
+    const link = getLink(graph, slot.link);
+    if (!link) continue;
+    activeIds.add(String(link.id ?? slot.link));
+    if (!Object.prototype.hasOwnProperty.call(link, "__terrySwitchOriginalColor")) link.__terrySwitchOriginalColor = link.color;
+    link.color = "rgba(0,0,0,0)";
+    const origin = getNode(graph, link.origin_id ?? link.originId);
+    const originSlot = Number(link.origin_slot ?? link.originSlot ?? 0) || 0;
+    const targetSlot = (node.inputs || []).indexOf(slot);
+    if (!origin || targetSlot < 0) continue;
+    result.push({start: connectionPos(origin,false,originSlot), end: connectionPos(node,true,targetSlot)});
+  }
+  for (const link of graphLinkList(graph)) {
+    if (!Object.prototype.hasOwnProperty.call(link, "__terrySwitchOriginalColor")) continue;
+    const id = String(link.id ?? "");
+    if (activeIds.has(id)) continue;
+    const original = link.__terrySwitchOriginalColor;
+    if (original == null || original === "") delete link.color; else link.color = original;
+    delete link.__terrySwitchOriginalColor;
+  }
+  return result;
+}
+
+function drawSwitchActiveWires(canvas, ctx, wires) {
+  if (!ctx || !wires?.length) return;
+  const width = Math.max(2.5, Number(canvas?.connections_width) || 3);
+  for (const wire of wires) {
+    const [x1,y1]=wire.start||[], [x2,y2]=wire.end||[];
+    if (![x1,y1,x2,y2].every(Number.isFinite)) continue;
+    const bend=Math.max(50,Math.min(180,Math.abs(x2-x1)*0.5));
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.bezierCurveTo(x1+bend,y1,x2-bend,y2,x2,y2);
+    ctx.lineCap="round"; ctx.lineJoin="round";
+    ctx.strokeStyle="rgba(216,189,103,.18)"; ctx.lineWidth=width+5; ctx.stroke();
+    ctx.strokeStyle="#d8bd67"; ctx.lineWidth=width+0.8; ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function patchSwitchActiveWireCanvas() {
+  const canvas=app.canvas;
+  if (!canvas || canvas.__terrySwitchActiveWirePatched || typeof canvas.drawConnections !== "function") return;
+  canvas.__terrySwitchActiveWirePatched=true;
+  const old=canvas.drawConnections;
+  canvas.drawConnections=function(ctx) {
+    const wires=prepareSwitchActiveWires(this);
+    const result=old.apply(this,arguments);
+    drawSwitchActiveWires(this,ctx||this.bgctx||this.ctx,wires);
+    return result;
+  };
+}
+
 function installSwitchHighlightStyles() {
   if (typeof document === "undefined" || document.getElementById("terry-switch-active-route-style")) return;
   const style = document.createElement("style");
@@ -396,6 +480,7 @@ app.registerExtension({
   },
   setup() {
         installSwitchHighlightStyles();
+        patchSwitchActiveWireCanvas();
         installNodes2RenameHandler();
         globalThis.__terrySyncSwitchUI = (node) => {
           if (isLine(node)) syncLine(node);
@@ -404,6 +489,7 @@ app.registerExtension({
         };
       },
   afterConfigureGraph() {
+    patchSwitchActiveWireCanvas();
     for (const n of nodes()) {
       if (isLine(n)) syncLine(n);
       else if (isBool(n)) syncBool(n);
