@@ -1,0 +1,29 @@
+name: Diagnose H3 title source
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/diag-h3-title.yml
+permissions:
+  contents: write
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Search title sources
+        run: |
+          echo '=== exact/near H3 title strings ==='
+          git grep -n -E 'TerryXu.*H3|H3.*提示词编辑器|node\.title|title[[:space:]]*=' -- ':!README.md' || true
+          echo '=== all H3 schema/name refs ==='
+          git grep -n -E 'TerryXuH3PromptEditor|H3PromptEditor' || true
+          echo '=== tracked files with TerryXu and H3 ==='
+          git grep -l -E 'TerryXu.*H3|H3.*TerryXu' || true
+      - name: Remove diagnostic workflow
+        run: |
+          rm .github/workflows/diag-h3-title.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove H3 title diagnostic workflow"
+          git push
