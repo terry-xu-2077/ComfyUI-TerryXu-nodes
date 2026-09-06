@@ -13,14 +13,6 @@ const NODE_TITLES = {
     en: "TerryXu Group Manager",
     zh: "TerryXu 分组开关",
   },
-  TerryXuH3PromptEditor: {
-    en: "TerryXu H3 Prompt Editor",
-    zh: "TerryXu H3 提示词编辑器",
-  },
-  TerryXuH3ShotTimeline: {
-    en: "TerryXu H3 Prompt Editor (Timeline)",
-    zh: "TerryXu H3 提示词编辑器（时间轴）",
-  },
 };
 
 function currentLanguage() {
