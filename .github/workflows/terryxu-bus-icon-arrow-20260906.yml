@@ -1,0 +1,50 @@
+name: TerryXu bus icon arrow
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-bus-icon-arrow-20260906.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Change bus title icon
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('web/wire_bus.js')
+          s = p.read_text(encoding='utf-8')
+          replacements = [
+              ('🛝 总线-入', '↔️ 总线-入'),
+              ('🛝 总线-出', '↔️ 总线-出'),
+              ('🛝 Bus-In', '↔️ Bus-In'),
+              ('🛝 Bus-Out', '↔️ Bus-Out'),
+              ('packTitle: "总线-入"', 'packTitle: "↔️ 总线-入"'),
+              ('unpackTitle: "总线-出"', 'unpackTitle: "↔️ 总线-出"'),
+              ('wirelessPackTitle: "总线-入"', 'wirelessPackTitle: "↔️ 总线-入"'),
+              ('wirelessUnpackTitle: "总线-出"', 'wirelessUnpackTitle: "↔️ 总线-出"'),
+              ('packTitle: " Bus-In"', 'packTitle: "↔️ Bus-In"'),
+              ('unpackTitle: " Bus-Out"', 'unpackTitle: "↔️ Bus-Out"'),
+              ('wirelessPackTitle: "Bus-In"', 'wirelessPackTitle: "↔️ Bus-In"'),
+              ('wirelessUnpackTitle: "Bus-Out"', 'wirelessUnpackTitle: "↔️ Bus-Out"'),
+          ]
+          for old, new in replacements:
+              s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+          Path('.github/workflows/terryxu-bus-icon-arrow-20260906.yml').unlink()
+          PY
+      - name: Validate
+        run: |
+          node --check web/wire_bus.js
+          grep -q '↔️ 总线-入' web/wire_bus.js
+          grep -q '↔️ 总线-出' web/wire_bus.js
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Use arrow icon for bus nodes"
+          git push
