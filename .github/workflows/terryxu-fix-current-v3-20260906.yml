@@ -1,0 +1,106 @@
+name: TerryXu one-shot current fixes v3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-fix-current-v3-20260906.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reuse v2 patch and finish timeline disable
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          workflow = Path('.github/workflows/terryxu-fix-current-v2-20260906.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Validate"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          lines = workflow[start:end].splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          exec(compile(script, '<v2-patch>', 'exec'), {})
+
+          # v2 removed bare class references, but __all__ stores the name as a string.
+          p = Path('nodes/__init__.py')
+          text = p.read_text(encoding='utf-8')
+          text = re.sub(r'(?m)^\s*["\']H3ShotTimeline["\'],\s*\n', '', text)
+          p.write_text(text, encoding='utf-8')
+
+          # Remove this final temporary workflow as well.
+          me = Path('.github/workflows/terryxu-fix-current-v3-20260906.yml')
+          if me.exists(): me.unlink()
+          for path in (Path('.github/workflows'), Path('.github')):
+              try: path.rmdir()
+              except OSError: pass
+          PY
+
+      - name: Validate all fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          for p in Path('.').rglob('*.py'):
+              if '.git' not in p.parts:
+                  ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
+          print('python syntax: OK')
+
+          root = Path('__init__.py').read_text(encoding='utf-8')
+          nodes = Path('nodes/__init__.py').read_text(encoding='utf-8')
+          assert 'H3ShotTimeline' not in root and 'H3ShotTimeline' not in nodes
+          print('timeline disabled: OK')
+
+          menu = Path('web/h3_shared_menus.js').read_text(encoding='utf-8').split('function openAssetMenu(controller) {', 1)[1].split('function nextSpeaker', 1)[0]
+          assert '可见主体' not in menu and '新建主体' not in menu and '已建立引用' not in menu
+          assert '仅显示已连接的图片、视频和音频' in menu
+          print('H3 @ menu simplified: OK')
+
+          bus = Path('web/wire_bus.js').read_text(encoding='utf-8')
+          defs = bus.split('addCustomNodeDefs(defs) {', 1)[1].split('beforeRegisterNodeDef', 1)[0]
+          assert 'defs[PACK_TYPE]' not in defs and 'defs[UNPACK_TYPE]' not in defs
+          assert 'defs[WIRELESS_PACK_TYPE]' in defs and 'defs[WIRELESS_UNPACK_TYPE]' in defs
+          assert '[BUS_TYPE]' in defs and 'required: { bus: [BUS_TYPE' in defs
+          print('merged bus defs: OK')
+
+          visual = Path('web/wire_bus_visual.js').read_text(encoding='utf-8')
+          assert 'nodeType(this) === WIRELESS_PACK_TYPE) && Number(slot) === 0' in visual
+          assert 'nodeType(this) === WIRELESS_UNPACK_TYPE) && Number(slot) === 0' in visual
+          print('merged bus visual ports: OK')
+
+          assert not Path('web/switch_input_names.js').exists()
+          assert not Path('web/switch_named_combo.js').exists()
+          line = Path('web/line_switch.js').read_text(encoding='utf-8')
+          sui = Path('web/switch_ui.js').read_text(encoding='utf-8')
+          assert '}, 500);' not in line
+          assert '}, 700);' not in sui
+          assert '__terrySyncSwitchUI' in line and '__terrySyncSwitchUI' in sui
+          print('switch UI de-duplicated: OK')
+          PY
+
+          for f in web/*.js; do
+            echo "checking $f"
+            node --check "$f"
+          done
+
+      - name: Commit fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix H3, merged bus, and remote controls"
+          git push origin HEAD:main
