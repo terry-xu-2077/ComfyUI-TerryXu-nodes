@@ -94,23 +94,18 @@ function normalizeLinks(node) {
   const out = [];
   for (const link of ensureLinks(node)) {
     const id = Number(link?.source_id);
-    const rawSlot = Number(link?.source_slot) || 0;
+    const slot = Number(link?.source_slot) || 0;
     if (!Number.isFinite(id) || id === Number(node.id)) continue;
-    const rawSource = graph?.getNodeById?.(id);
-    if (!rawSource) continue;
-    const resolved = resolveVirtualMediaSource(rawSource, rawSlot, link?.source_type);
-    const src = resolved.node;
-    const slot = resolved.slot;
-    const resolvedId = Number(src?.id);
-    if (!src || !Number.isFinite(resolvedId) || resolvedId === Number(node.id)) continue;
-    const kind = sourceType(src, slot, resolved.type || link?.source_type);
-    const key = `${resolvedId}:${slot}`;
+    const src = graph?.getNodeById?.(id);
+    if (!src) continue;
+    const kind = sourceType(src, slot, link?.source_type);
+    const key = `${id}:${slot}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({
-      source_id: resolvedId,
+      source_id: id,
       source_slot: slot,
-      source_type: String(resolved.type || src.outputs?.[slot]?.type || link?.source_type || "*"),
+      source_type: String(src.outputs?.[slot]?.type || link?.source_type || "*"),
       kind,
     });
   }
@@ -119,12 +114,7 @@ function normalizeLinks(node) {
 }
 
 function addVirtualLink(node, source, sourceSlot = 0, sourceTypeValue = "") {
-  if (!node || !source) return false;
-  const resolved = resolveVirtualMediaSource(source, sourceSlot, sourceTypeValue);
-  source = resolved.node;
-  sourceSlot = resolved.slot;
-  sourceTypeValue = resolved.type;
-  if (!source || Number(source.id) === Number(node.id)) return false;
+  if (!node || !source || Number(source.id) === Number(node.id)) return false;
   const links = normalizeLinks(node);
   if (links.length >= MAX_MEDIA) return false;
   if (links.some((x) => Number(x.source_id) === Number(source.id) && Number(x.source_slot) === Number(sourceSlot))) return false;
@@ -260,10 +250,16 @@ function patchGraphToPrompt() {
       dst.inputs ||= {};
       delete dst.inputs.media;
       for (const key of Object.keys(dst.inputs)) if (/^asset\d+$/i.test(key)) delete dst.inputs[key];
-      normalizeLinks(node).forEach((link, i) => {
-        if (!output[String(link.source_id)]) return;
-        dst.inputs[`asset${i + 1}`] = [String(link.source_id), Number(link.source_slot) || 0];
-      });
+      let assetIndex = 0;
+    for (const link of normalizeLinks(node)) {
+      const displaySource = app.graph?.getNodeById?.(Number(link.source_id));
+      const resolved = resolveVirtualMediaSource(displaySource, link.source_slot, link.source_type);
+      const executionSource = resolved.node || displaySource;
+      const executionId = Number(executionSource?.id);
+      if (!executionSource || !Number.isFinite(executionId) || !output[String(executionId)]) continue;
+      assetIndex += 1;
+      dst.inputs[`asset${assetIndex}`] = [String(executionId), Number(resolved.slot) || 0];
+    }
     }
     return data;
   };
@@ -310,13 +306,24 @@ function previewFromSource(node, kind) {
 function mediaOptions(node) {
   const counts = { picture: 0, video: 0, audio: 0 };
   return normalizeLinks(node).map((link) => {
-    const kind = link.kind || "picture";
+    const displaySource = app.graph?.getNodeById?.(Number(link.source_id));
+    const resolved = resolveVirtualMediaSource(displaySource, link.source_slot, link.source_type);
+    const src = resolved.node || displaySource;
+    const slot = Number(resolved.slot) || 0;
+    const kind = sourceType(src, slot, resolved.type || link.source_type);
     counts[kind] = (counts[kind] || 0) + 1;
     const index = counts[kind];
-    const src = app.graph?.getNodeById?.(Number(link.source_id));
     const tag = kind === "picture" ? `<Picture ${index}>` : kind === "video" ? `<Video ${index}>` : `<Audio ${index}>`;
     const label = kind === "picture" ? `Picture ${index}` : kind === "video" ? `Video ${index}` : `Audio ${index}`;
-    return { kind, index, tag, label, source: filenameFromSource(src, kind).split(/[\\/]/).pop() || src?.title || label, preview: previewFromSource(src, kind) };
+    if (src && src !== displaySource) watchSourceNode(src);
+    return {
+      kind,
+      index,
+      tag,
+      label,
+      source: filenameFromSource(src, kind).split(/[\/]/).pop() || src?.title || label,
+      preview: previewFromSource(src, kind),
+    };
   });
 }
 
