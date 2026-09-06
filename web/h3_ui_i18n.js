@@ -135,7 +135,6 @@ function translateElement(el) {
 function localizeNode(node) {
   if (!isTarget(node)) return;
   if (isZh()) return;
-  node.title = "TerryXu | H3 Prompt Editor";
   for (const input of node.inputs || []) {
     if (String(input?.name || "") === "media") {
       input.label = "References · Multi-input";
