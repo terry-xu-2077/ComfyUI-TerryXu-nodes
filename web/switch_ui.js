@@ -277,14 +277,12 @@ app.registerExtension({
     queueMicrotask(() => { if (isLine(node)) syncLine(node); else if (isBool(node)) syncBool(node); else if (isRemote(node)) syncRemote(node); });
   },
   setup() {
-    setInterval(() => {
-      for (const n of nodes()) {
-        if (isLine(n)) syncLine(n);
-        else if (isBool(n)) syncBool(n);
-        else if (isRemote(n)) syncRemote(n);
-      }
-    }, 700);
-  },
+        globalThis.__terrySyncSwitchUI = (node) => {
+          if (isLine(node)) syncLine(node);
+          else if (isBool(node)) syncBool(node);
+          else if (isRemote(node)) syncRemote(node);
+        };
+      },
   afterConfigureGraph() {
     for (const n of nodes()) {
       if (isLine(n)) syncLine(n);

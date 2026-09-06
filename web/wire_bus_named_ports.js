@@ -140,6 +140,8 @@ function namedEntries(pack) {
 
 function findPackForUnpack(unpack) {
   if (nodeType(unpack) === WIRELESS_UNPACK_TYPE) {
+    const physical = resolveSource(unpack?.graph, unpack?.inputs?.[0]?.link);
+    if (physical && nodeType(physical.node) === WIRELESS_PACK_TYPE) return physical.node;
     const name = wirelessChannelName(unpack);
     if (!name) return null;
     for (const graph of [unpack.graph, app.graph]) {

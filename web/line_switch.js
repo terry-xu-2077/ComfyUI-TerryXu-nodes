@@ -247,6 +247,7 @@ function refreshLine(node) {
   }
   const channel = widgetByName(node, CHANNEL_WIDGET);
   if (channel) channel.label = labels.channel;
+  globalThis.__terrySyncSwitchUI?.(node);
   node.graph?.setDirtyCanvas?.(true, true);
 }
 
@@ -270,6 +271,7 @@ function refreshBool(node) {
   if (widget) widget.label = labels.bool;
   const channel = widgetByName(node, CHANNEL_WIDGET);
   if (channel) channel.label = labels.channel;
+  globalThis.__terrySyncSwitchUI?.(node);
   node.graph?.setDirtyCanvas?.(true, true);
 }
 
@@ -429,6 +431,7 @@ function refreshRemote(node, force = false) {
     if (description.kind === "combo") valueWidget.options.values = description.values || [];
   }
   properties(node)[REMOTE_VALUE_PROPERTY] = description?.value ?? properties(node)[REMOTE_VALUE_PROPERTY];
+  globalThis.__terrySyncSwitchUI?.(node);
   node.graph?.setDirtyCanvas?.(true, true);
 }
 
@@ -658,18 +661,10 @@ app.registerExtension({
   },
 
   setup() {
-    patchCanvas();
-    installExecutedListener();
-    startAnimation();
-    setInterval(() => {
-      patchCanvas();
-      for (const node of graphNodes()) {
-        if (isLine(node)) refreshLine(node);
-        else if (isBool(node)) refreshBool(node);
-        else if (isRemote(node)) refreshRemote(node);
-      }
-    }, 500);
-  },
+        patchCanvas();
+        installExecutedListener();
+        startAnimation();
+      },
 
   afterConfigureGraph() {
     for (const node of graphNodes()) {

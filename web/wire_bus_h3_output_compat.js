@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 
-const PACK_TYPE = "TerryXuWireBusPack";
+const PACK_TYPE = "TerryXuWirelessBusPack";
 const H3_TYPES = new Set(["TerryXuH3PromptEditor", "TerryXuH3ShotTimeline"]);
 
 function nodeType(node) {

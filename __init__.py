@@ -6,7 +6,6 @@ from .nodes import (
     DateFormatter,
     FileSave,
     H3PromptEditor,
-    H3ShotTimeline,
     LineSwitch,
     VideoCompare,
 )
@@ -29,7 +28,6 @@ class TerryXuExtension(ComfyExtension):
             DateFormatter,
             VideoCompare,
             H3PromptEditor,
-            H3ShotTimeline,
             LineSwitch,
             BoolSwitch,
         ]

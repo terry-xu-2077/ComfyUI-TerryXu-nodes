@@ -51,12 +51,12 @@ function labels() {
     return {
       packTitle: "🔗总线-入",
       unpackTitle: "🔗总线-出",
-      wirelessPackTitle: "⛓️‍💥总线-入",
-      wirelessUnpackTitle: "⛓️‍💥总线-出",
+      wirelessPackTitle: "总线-入",
+      wirelessUnpackTitle: "总线-出",
       packDescription: "将任意数量、任意类型的连接汇总为一根虚拟总线，支持 KJNodes Get/Set。",
       unpackDescription: "从虚拟总线自动恢复原始连接的数量、类型和顺序，支持 KJNodes Get/Set。",
-      wirelessPackDescription: "将多路连接发布到独立的 TerryXu 无线总线频道，不与 KJNodes Get/Set 混用。",
-      wirelessUnpackDescription: "选择 TerryXu 无线总线频道，自动恢复对应的多路连接。",
+      wirelessPackDescription: "汇总多路连接；既可从总线端口有线连出，也可通过 TerryXu 频道无线发布。",
+      wirelessUnpackDescription: "既可从总线端口有线接收，也可选择 TerryXu 频道无线接收，并自动恢复多路连接。",
       category: "TerryXu/线束整理",
       addWire: "添加线束",
       bus: "总线",
@@ -70,12 +70,12 @@ function labels() {
   return {
     packTitle: "🔗 Bus-In",
     unpackTitle: "🔗 Bus-Out",
-    wirelessPackTitle: "⛓️‍💥 Bus-In",
-    wirelessUnpackTitle: "⛓️‍💥 Bus-Out",
+    wirelessPackTitle: "Bus-In",
+    wirelessUnpackTitle: "Bus-Out",
     packDescription: "Bundle any number of connections into one virtual bus. Supports KJNodes Get/Set.",
     unpackDescription: "Restore the original connection count, types and order from a virtual bus. Supports KJNodes Get/Set.",
-    wirelessPackDescription: "Publish multiple connections to an independent TerryXu wireless bus channel.",
-    wirelessUnpackDescription: "Select a TerryXu wireless bus channel and restore all of its connections.",
+    wirelessPackDescription: "Bundle multiple connections and expose them through both a wired BUS output and a TerryXu wireless channel.",
+    wirelessUnpackDescription: "Restore a bus from either the wired BUS input or a TerryXu wireless channel.",
     category: "TerryXu/Wire Management",
     addWire: "Add wire",
     bus: "bus",
@@ -558,6 +558,11 @@ function collectDownstreamTargets(graph, node, outputSlot, seenNodes = new Set()
 
 function findPackFromUnpack(unpack) {
   if (isWirelessUnpack(unpack)) {
+    const linkId = unpack?.inputs?.[0]?.link;
+    if (unpack?.graph && linkId != null) {
+      const upstream = resolveUpstream(unpack.graph, linkId);
+      if (upstream && isWirelessPack(upstream.node)) return upstream.node;
+    }
     const name = wirelessChannelName(unpack);
     if (!name) return null;
     return wirelessPacksInScope(unpack.graph || app.graph)
@@ -784,35 +789,21 @@ function localizeFixedPorts(node, updateTitle = false) {
   const text = labels();
   if (isWiredPack(node)) {
     const out = node.outputs?.[0];
-    if (out) {
-      out.name = "bus";
-      out.label = text.bus;
-      out.type = BUS_TYPE;
-    }
+    if (out) { out.name = "bus"; out.label = text.bus; out.type = BUS_TYPE; }
     if (updateTitle) node.title = text.packTitle;
   } else if (isWiredUnpack(node)) {
     const input = node.inputs?.[0];
-    if (input) {
-      input.name = "bus";
-      input.label = text.bus;
-      input.type = BUS_TYPE;
-    }
+    if (input) { input.name = "bus"; input.label = text.bus; input.type = BUS_TYPE; }
     if (updateTitle) node.title = text.unpackTitle;
   } else if (isWirelessPack(node)) {
-    for (const input of node.inputs || []) {
-      if (input?.type !== BUS_TYPE) continue;
-      input.name = "bus";
-      input.label = text.bus;
-    }
+    const out = node.outputs?.[0];
+    if (out) { out.name = "bus"; out.label = text.bus; out.type = BUS_TYPE; }
     const widget = wirelessChannelWidget(node);
     if (widget) widget.name = text.channelName;
     if (updateTitle) node.title = text.wirelessPackTitle;
   } else if (isWirelessUnpack(node)) {
-    for (const output of node.outputs || []) {
-      if (output?.type !== BUS_TYPE) continue;
-      output.name = "bus";
-      output.label = text.bus;
-    }
+    const input = node.inputs?.[0];
+    if (input) { input.name = "bus"; input.label = text.bus; input.type = BUS_TYPE; }
     const widget = wirelessChannelWidget(node);
     if (widget) widget.name = text.channelSelect;
     if (updateTitle) node.title = text.wirelessUnpackTitle;
@@ -1141,44 +1132,26 @@ app.registerExtension({
   name: "TerryXu.WireBus",
 
   addCustomNodeDefs(defs) {
-    const text = labels();
-    defs[PACK_TYPE] = makeNodeDef(
-      PACK_TYPE,
-      text.packTitle,
-      text.packDescription,
-      text.category,
-      { required: { wire: [EMPTY_TYPE, { label: text.addWire }] } },
-      [BUS_TYPE],
-      [text.bus]
-    );
-    defs[UNPACK_TYPE] = makeNodeDef(
-      UNPACK_TYPE,
-      text.unpackTitle,
-      text.unpackDescription,
-      text.category,
-      { required: { bus: [BUS_TYPE, { label: text.bus }] } },
-      [],
-      []
-    );
-    defs[WIRELESS_PACK_TYPE] = makeNodeDef(
-      WIRELESS_PACK_TYPE,
-      text.wirelessPackTitle,
-      text.wirelessPackDescription,
-      text.category,
-      { required: { wire: [EMPTY_TYPE, { label: text.addWire }] } },
-      [],
-      []
-    );
-    defs[WIRELESS_UNPACK_TYPE] = makeNodeDef(
-      WIRELESS_UNPACK_TYPE,
-      text.wirelessUnpackTitle,
-      text.wirelessUnpackDescription,
-      text.category,
-      { required: {} },
-      [],
-      []
-    );
-  },
+  const text = labels();
+  defs[WIRELESS_PACK_TYPE] = makeNodeDef(
+    WIRELESS_PACK_TYPE,
+    text.wirelessPackTitle,
+    text.wirelessPackDescription,
+    text.category,
+    { required: { wire: [EMPTY_TYPE, { label: text.addWire }] } },
+    [BUS_TYPE],
+    [text.bus]
+  );
+  defs[WIRELESS_UNPACK_TYPE] = makeNodeDef(
+    WIRELESS_UNPACK_TYPE,
+    text.wirelessUnpackTitle,
+    text.wirelessUnpackDescription,
+    text.category,
+    { required: { bus: [BUS_TYPE, { label: text.bus }] } },
+    [],
+    []
+  );
+},
 
   beforeRegisterNodeDef(nodeType, nodeData) {
     const nodeName = nodeData.name;
@@ -1300,7 +1273,7 @@ app.registerExtension({
       if (isPackDef) {
         if (type === LiteGraph.INPUT) queueMicrotask(() => refreshPackSlots(this));
         else queueMicrotask(syncAllUnpacks);
-      } else if (!isWirelessDef && type === LiteGraph.INPUT && index === 0) {
+      } else if (type === LiteGraph.INPUT && index === 0) {
         queueMicrotask(() => syncUnpack(this, true));
       } else if (type === LiteGraph.OUTPUT) {
         const pack = findPackFromUnpack(this);
@@ -1310,36 +1283,29 @@ app.registerExtension({
     };
 
     if (isPackDef) {
-      nodeType.prototype.__terryBusLaneEntries = function () {
-        return effectivePackLaneEntries(this);
-      };
-      nodeType.prototype.onConnectInput = function (slot, type, output, originNode) {
-        if (slot < 0) return false;
-        if (!isWirelessDef) return type !== BUS_TYPE;
-
-        const connectedBus = (this.inputs || []).findIndex((input) =>
-          input?.link != null && input.type === BUS_TYPE
-        );
-        if (connectedBus >= 0) return slot === connectedBus && type === BUS_TYPE;
-        if (type !== BUS_TYPE) return true;
-        if (!isWiredPack(originNode) && !isReroute(originNode) && !isGet(originNode)) return false;
-        return !(this.inputs || []).some((input, index) => index !== slot && input?.link != null);
-      };
-      if (!isWirelessDef) {
-        nodeType.prototype.onConnectOutput = function (slot, type, input, targetNode) {
-          return slot === 0 && (
-            isWiredUnpack(targetNode)
-            || isWirelessPack(targetNode)
-            || isReroute(targetNode)
-            || isSet(targetNode)
-          );
-        };
-      }
-    } else if (!isWirelessDef) {
-      nodeType.prototype.onConnectInput = function (slot, type, output, originNode) {
-        return slot === 0 && (type === BUS_TYPE || isWiredPack(originNode) || isReroute(originNode) || isGet(originNode));
-      };
-    }
+    nodeType.prototype.__terryBusLaneEntries = function () {
+      return effectivePackLaneEntries(this);
+    };
+    nodeType.prototype.onConnectInput = function (slot, type) {
+      return slot >= 0 && type !== BUS_TYPE;
+    };
+    nodeType.prototype.onConnectOutput = function (slot, type, input, targetNode) {
+      return slot === 0 && (
+        isWirelessUnpack(targetNode)
+        || isReroute(targetNode)
+        || isSet(targetNode)
+      );
+    };
+  } else {
+    nodeType.prototype.onConnectInput = function (slot, type, output, originNode) {
+      return slot === 0 && (
+        type === BUS_TYPE
+        || isWirelessPack(originNode)
+        || isReroute(originNode)
+        || isGet(originNode)
+      );
+    };
+  }
 
     const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function () {

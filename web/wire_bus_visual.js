@@ -116,7 +116,7 @@ function isBusLink(graph, link) {
       target?.inputs?.[targetSlot]?.type ||
       ""
   );
-  return type === BUS_TYPE || nodeType(origin) === PACK_TYPE;
+  return type === BUS_TYPE || nodeType(origin) === PACK_TYPE || nodeType(origin) === WIRELESS_PACK_TYPE;
 }
 
 function pointForOutput(node, slot) {
@@ -194,7 +194,7 @@ function sameColor(a, b) {
 
 function upstreamPack(graph, node, seen = new Set()) {
   if (!node || !graph) return null;
-  if (nodeType(node) === PACK_TYPE) return { node, graph };
+  if (nodeType(node) === PACK_TYPE || nodeType(node) === WIRELESS_PACK_TYPE) return { node, graph };
 
   const key = `${graph?.id || "g"}:${String(node.id ?? node)}`;
   if (seen.has(key)) return null;
@@ -557,7 +557,8 @@ ${root}[data-collapsed] [data-testid="node-inner-wrapper"]{
       wiredBadges.push(`${expandedRoot} [data-testid^="node-body-"] > .mt-auto`);
     } else {
       if (type === WIRELESS_PACK_TYPE) {
-        phantomOutputRows.push(`${expandedRoot} .lg-slot--output`);
+        packRows.push(`${expandedRoot} .lg-slot--output`);
+        packs.push(`${expandedRoot} .lg-slot--output [data-testid="slot-connection-dot"]`);
         for (let slot = 0; slot < (node.inputs?.length || 0); slot++) {
           const input = node.inputs[slot];
           if (input?.type !== BUS_TYPE || input.link == null) continue;
@@ -566,6 +567,8 @@ ${root}[data-collapsed] [data-testid="node-inner-wrapper"]{
           );
         }
       } else if (type === WIRELESS_UNPACK_TYPE) {
+        unpackRows.push(`${expandedRoot} .lg-slot--input`);
+        unpacks.push(`${expandedRoot} .lg-slot--input [data-testid="slot-connection-dot"]`);
         for (let slot = 0; slot < (node.outputs?.length || 0); slot++) {
           if (node.outputs[slot]?.type !== BUS_TYPE) continue;
           wirelessBusOutputs.push(
@@ -791,8 +794,7 @@ function patchBusNode(node) {
   node.getInputPos = function (slot) {
     if (isNodeCollapsed(this)) return originalInputPos?.apply?.(this, arguments);
     if (
-      (nodeType(this) === UNPACK_TYPE && Number(slot) === 0)
-      || (nodeType(this) === WIRELESS_PACK_TYPE && this.inputs?.length === 1 && this.inputs?.[slot]?.type === BUS_TYPE)
+      ((nodeType(this) === UNPACK_TYPE || nodeType(this) === WIRELESS_UNPACK_TYPE) && Number(slot) === 0)
     ) {
       return [Number(this.pos?.[0] || 0), nodeVisualCenterY(this)];
     }
@@ -804,8 +806,7 @@ function patchBusNode(node) {
   node.getOutputPos = function (slot) {
     if (isNodeCollapsed(this)) return originalOutputPos?.apply?.(this, arguments);
     if (
-      (nodeType(this) === PACK_TYPE && Number(slot) === 0)
-      || (nodeType(this) === WIRELESS_UNPACK_TYPE && this.outputs?.length === 1 && this.outputs?.[slot]?.type === BUS_TYPE)
+      ((nodeType(this) === PACK_TYPE || nodeType(this) === WIRELESS_PACK_TYPE) && Number(slot) === 0)
     ) {
       return [
         Number(this.pos?.[0] || 0) + Number(this.size?.[0] || 0),
@@ -836,15 +837,10 @@ function patchBusNode(node) {
     const result = originalForeground?.apply?.(this, arguments);
     if (isNodeCollapsed(this)) return result;
     try {
-      if (nodeType(this) === PACK_TYPE) drawCapsulePort(ctx, this, true, 0);
-      else if (nodeType(this) === UNPACK_TYPE) drawCapsulePort(ctx, this, false, 0);
-      else if (nodeType(this) === WIRELESS_PACK_TYPE) {
-        for (let slot = 0; slot < (this.inputs?.length || 0); slot++) {
-          const input = this.inputs[slot];
-          if (input?.type === BUS_TYPE && input.link != null) {
-            drawCapsulePort(ctx, this, false, slot);
-          }
-        }
+      if (nodeType(this) === PACK_TYPE || nodeType(this) === WIRELESS_PACK_TYPE) {
+        drawCapsulePort(ctx, this, true, 0);
+      } else if (nodeType(this) === UNPACK_TYPE || nodeType(this) === WIRELESS_UNPACK_TYPE) {
+        drawCapsulePort(ctx, this, false, 0);
       } else if (nodeType(this) === WIRELESS_UNPACK_TYPE) {
         for (let slot = 0; slot < (this.outputs?.length || 0); slot++) {
           if (this.outputs[slot]?.type === BUS_TYPE) {

@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 
 export const H3_BUS_TYPE = "TERRY_WIRE_BUS";
-export const H3_BUS_PACK_TYPE = "TerryXuWireBusPack";
+export const H3_BUS_PACK_TYPE = "TerryXuWirelessBusPack";
 export const H3_WIRELESS_BUS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
 export const H3_MEDIA_TYPES = new Set(["IMAGE", "VIDEO", "AUDIO"]);
 
