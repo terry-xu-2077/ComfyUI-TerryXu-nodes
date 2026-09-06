@@ -22,63 +22,37 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('web/switch_ui.js')
           text = path.read_text(encoding='utf-8')
 
-          anchor = '''function syncNodes2InputLabels(node) {
-            const root = nodes2Root(node);
-            if (!root) return;
-            const rows = [...root.querySelectorAll(".lg-slot--input")]
-              .filter((row) => String(row.textContent || "").includes("✎"));
-            const entries = renameEntries(node);
-            rows.forEach((row, index) => {
-              const entry = entries[index];
-              const span = row.querySelector(".text-node-component-slot-text");
-              if (entry && span) span.textContent = `${entry.label}   ✎`;
-            });
-          }
-          '''
-          replacement = '''function activeEntryIndex(node) {
+          if 'function activeEntryIndex(node)' not in text:
+              text = text.replace(
+                  'function syncNodes2InputLabels(node) {',
+                  '''function activeEntryIndex(node) {
             if (isLine(node)) return Math.max(0, numericIndex(node) - 1);
             if (isBool(node)) return boolState(node) ? 1 : 0;
             return -1;
           }
 
-          function syncNodes2InputLabels(node) {
-            const root = nodes2Root(node);
-            if (!root) return;
-            const rows = [...root.querySelectorAll(".lg-slot--input")]
-              .filter((row) => String(row.textContent || "").includes("✎"));
-            const entries = renameEntries(node);
-            const activeIndex = activeEntryIndex(node);
-            rows.forEach((row, index) => {
-              const entry = entries[index];
-              const span = row.querySelector(".text-node-component-slot-text");
-              if (entry && span) span.textContent = `${entry.label}   ✎`;
-              row.classList.toggle("terry-switch-active-route", index === activeIndex);
-            });
-          }
-          '''
-          if anchor not in text:
-              raise RuntimeError('syncNodes2InputLabels anchor not found')
-          text = text.replace(anchor, replacement, 1)
+          function syncNodes2InputLabels(node) {''',
+                  1,
+              )
+              text = text.replace(
+                  '  const entries = renameEntries(node);\n  rows.forEach((row, index) => {',
+                  '  const entries = renameEntries(node);\n  const activeIndex = activeEntryIndex(node);\n  rows.forEach((row, index) => {',
+                  1,
+              )
+              text = text.replace(
+                  '    if (entry && span) span.textContent = `${entry.label}   ✎`;\n  });\n}',
+                  '    if (entry && span) span.textContent = `${entry.label}   ✎`;\n    row.classList.toggle("terry-switch-active-route", index === activeIndex);\n  });\n}',
+                  1,
+              )
 
-          anchor2 = '''function syncLineLabels(node) {
-            routes(node).forEach((slot, i) => {
-              slot.label = `${routeName(node, slot, i)}   ✎`;
-            });
-            queueMicrotask(() => syncNodes2InputLabels(node));
-          }
-          function syncBoolLabels(node) {
-            const off = input(node, "input_false");
-            const on = input(node, "input_true");
-            if (off) off.label = `${boolName(node, false)}   ✎`;
-            if (on) on.label = `${boolName(node, true)}   ✎`;
-            queueMicrotask(() => syncNodes2InputLabels(node));
-          }
-          '''
-          replacement2 = '''function markClassicActiveSlots(node, entries, activeIndex) {
+          if 'function markClassicActiveSlots' not in text:
+              marker = 'function syncLineLabels(node) {'
+              helper = '''function markClassicActiveSlots(node, entries, activeIndex) {
             entries.forEach((slot, index) => {
               if (!slot) return;
               if (index === activeIndex) {
@@ -90,31 +64,48 @@ jobs:
               }
             });
           }
-          function syncLineLabels(node) {
+          '''
+              text = text.replace(marker, helper + marker, 1)
+              text = text.replace(
+                  '''function syncLineLabels(node) {
+            routes(node).forEach((slot, i) => {
+              slot.label = `${routeName(node, slot, i)}   ✎`;
+            });
+            queueMicrotask(() => syncNodes2InputLabels(node));
+          }''',
+                  '''function syncLineLabels(node) {
             const slots = routes(node);
             slots.forEach((slot, i) => {
               slot.label = `${routeName(node, slot, i)}   ✎`;
             });
             markClassicActiveSlots(node, slots, activeEntryIndex(node));
             queueMicrotask(() => syncNodes2InputLabels(node));
-          }
-          function syncBoolLabels(node) {
+          }''',
+                  1,
+              )
+              text = text.replace(
+                  '''function syncBoolLabels(node) {
+            const off = input(node, "input_false");
+            const on = input(node, "input_true");
+            if (off) off.label = `${boolName(node, false)}   ✎`;
+            if (on) on.label = `${boolName(node, true)}   ✎`;
+            queueMicrotask(() => syncNodes2InputLabels(node));
+          }''',
+                  '''function syncBoolLabels(node) {
             const off = input(node, "input_false");
             const on = input(node, "input_true");
             if (off) off.label = `${boolName(node, false)}   ✎`;
             if (on) on.label = `${boolName(node, true)}   ✎`;
             markClassicActiveSlots(node, [off, on], activeEntryIndex(node));
             queueMicrotask(() => syncNodes2InputLabels(node));
-          }
-          '''
-          if anchor2 not in text:
-              raise RuntimeError('sync label anchor not found')
-          text = text.replace(anchor2, replacement2, 1)
+          }''',
+                  1,
+              )
 
-          anchor3 = '''function installNodes2RenameHandler() {
-            if (typeof document === "undefined" || globalThis.__terrySwitchNodes2RenameHandler) return;
-          '''
-          replacement3 = '''function installSwitchHighlightStyles() {
+          if 'function installSwitchHighlightStyles()' not in text:
+              text = text.replace(
+                  'function installNodes2RenameHandler() {',
+                  '''function installSwitchHighlightStyles() {
             if (typeof document === "undefined" || document.getElementById("terry-switch-active-route-style")) return;
             const style = document.createElement("style");
             style.id = "terry-switch-active-route-style";
@@ -131,25 +122,19 @@ jobs:
             document.head.append(style);
           }
 
-          function installNodes2RenameHandler() {
-            if (typeof document === "undefined" || globalThis.__terrySwitchNodes2RenameHandler) return;
-          '''
-          if anchor3 not in text:
-              raise RuntimeError('installNodes2RenameHandler anchor not found')
-          text = text.replace(anchor3, replacement3, 1)
+          function installNodes2RenameHandler() {''',
+                  1,
+              )
 
-          anchor4 = '''  setup() {
-                installNodes2RenameHandler();
-                globalThis.__terrySyncSwitchUI = (node) => {
-          '''
-          replacement4 = '''  setup() {
-                installSwitchHighlightStyles();
-                installNodes2RenameHandler();
-                globalThis.__terrySyncSwitchUI = (node) => {
-          '''
-          if anchor4 not in text:
-              raise RuntimeError('setup anchor not found')
-          text = text.replace(anchor4, replacement4, 1)
+          if 'installSwitchHighlightStyles();' not in text:
+              text, n = re.subn(
+                  r'(\n\s*setup\(\) \{\n)(\s*)installNodes2RenameHandler\(\);',
+                  lambda m: m.group(1) + m.group(2) + 'installSwitchHighlightStyles();\n' + m.group(2) + 'installNodes2RenameHandler();',
+                  text,
+                  count=1,
+              )
+              if n != 1:
+                  raise RuntimeError('setup hook not found')
 
           path.write_text(text, encoding='utf-8')
 
@@ -166,6 +151,7 @@ jobs:
           node --check web/switch_ui.js
           grep -q 'terry-switch-active-route' web/switch_ui.js
           grep -q 'markClassicActiveSlots' web/switch_ui.js
+          grep -q 'installSwitchHighlightStyles();' web/switch_ui.js
 
       - name: Commit
         shell: bash
