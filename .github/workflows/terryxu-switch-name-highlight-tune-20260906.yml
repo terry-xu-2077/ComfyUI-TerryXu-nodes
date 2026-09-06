@@ -1,114 +1,58 @@
-name: TerryXu switch naming and highlight tune
-
-on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/terryxu-switch-name-highlight-tune-20260906.yml
-
+name: TerryXu UI cleanup
+on: [push]
 permissions:
   contents: write
-
 jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Patch naming and highlight
+      - name: Apply pending UI changes
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
-          # Rename public display title only; internal TerryXuLineSwitch id stays stable.
+          # 1) Rename line switch display title.
           p = Path('nodes/line_switch.py')
-          t = p.read_text(encoding='utf-8')
-          t = t.replace('display_name="线路切换器"', 'display_name="多线切换器"')
-          p.write_text(t, encoding='utf-8')
+          s = p.read_text(encoding='utf-8').replace('display_name="线路切换器"', 'display_name="多线切换器"')
+          p.write_text(s, encoding='utf-8')
 
           p = Path('web/line_switch.js')
-          t = p.read_text(encoding='utf-8')
-          t = t.replace('lineTitle: "线路切换器"', 'lineTitle: "多线切换器"')
-          t = t.replace('lineTitle: "Line Switch"', 'lineTitle: "Multi-Line Switch"')
-          p.write_text(t, encoding='utf-8')
+          s = p.read_text(encoding='utf-8').replace('lineTitle: "线路切换器"', 'lineTitle: "多线切换器"').replace('lineTitle: "Line Switch"', 'lineTitle: "Multi-Line Switch"')
+          p.write_text(s, encoding='utf-8')
 
+          # 2) Selected wire: remove glow, keep outline width, slightly thicken bright core.
           p = Path('web/switch_wire_highlight.js')
-          t = p.read_text(encoding='utf-8')
-          old = '''  // Broad soft glow stays in the original type color.
-  if (makeLinkPath(ctx, start, end)) {
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.38;
-    ctx.lineWidth = width + 5.8;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 14;
-    ctx.stroke();
-  }
+          s = p.read_text(encoding='utf-8')
+          s = re.sub(r'\n  // Broad soft glow stays in the original type color\.\n  if \(makeLinkPath\(ctx, start, end\)\) \{\n    ctx\.strokeStyle = color;\n    ctx\.globalAlpha = 0\.38;\n    ctx\.lineWidth = width \+ 5\.8;\n    ctx\.shadowColor = color;\n    ctx\.shadowBlur = 14;\n    ctx\.stroke\(\);\n  \}\n', '\n', s, count=1)
+          s = s.replace('  ctx.shadowBlur = 0;\n', '', 1)
+          s = s.replace('ctx.lineWidth = Math.max(2.0, width - 0.45);', 'ctx.lineWidth = Math.max(2.5, width + 0.15);', 1)
+          s = s.replace('// Slimmer inner core: same hue mixed toward white for clear contrast.', '// Brighter inner core, slightly thicker; no glow.')
+          p.write_text(s, encoding='utf-8')
 
-  // Original type color becomes the outer outline.
-  ctx.shadowBlur = 0;
-  if (makeLinkPath(ctx, start, end)) {
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.96;
-    ctx.lineWidth = width + 2.5;
-    ctx.stroke();
-  }
+          # 3) Narrow H3 @ asset menu to the red-box target width.
+          p = Path('web/h3_shared_menus.js')
+          s = p.read_text(encoding='utf-8').replace('placeMenu(menu, editor, 360, 520);', 'placeMenu(menu, editor, 255, 520);', 1)
+          p.write_text(s, encoding='utf-8')
 
-  // Slimmer inner core: same hue mixed toward white for clear contrast.
-  if (makeLinkPath(ctx, start, end)) {
-    ctx.strokeStyle = bright;
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = Math.max(2.0, width - 0.45);
-    ctx.stroke();
-  }
-'''
-          new = '''  // Original type color is kept only as a crisp outer outline.
-  if (makeLinkPath(ctx, start, end)) {
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.98;
-    ctx.lineWidth = width + 2.5;
-    ctx.stroke();
-  }
-
-  // Brighter inner core, slightly thicker than before; no glow/shadow.
-  if (makeLinkPath(ctx, start, end)) {
-    ctx.strokeStyle = bright;
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = Math.max(2.5, width + 0.15);
-    ctx.stroke();
-  }
-'''
-          if old not in t:
-              raise SystemExit('highlight block not found')
-          t = t.replace(old, new, 1)
-          p.write_text(t, encoding='utf-8')
-
-          wf = Path('.github/workflows/terryxu-switch-name-highlight-tune-20260906.yml')
-          wf.unlink()
-          for folder in (Path('.github/workflows'), Path('.github')):
-              try: folder.rmdir()
-              except OSError: pass
+          Path('.github/workflows/terryxu-switch-name-highlight-tune-20260906.yml').unlink()
           PY
-
       - name: Validate
         shell: bash
         run: |
-          python3 -m py_compile nodes/line_switch.py
           node --check web/line_switch.js
           node --check web/switch_wire_highlight.js
-          grep -q 'display_name="多线切换器"' nodes/line_switch.py
-          grep -q 'lineTitle: "多线切换器"' web/line_switch.js
+          node --check web/h3_shared_menus.js
+          grep -q '多线切换器' nodes/line_switch.py
+          grep -q 'placeMenu(menu, editor, 255, 520);' web/h3_shared_menus.js
           ! grep -q 'shadowBlur = 14' web/switch_wire_highlight.js
-          test ! -e .github/workflows/terryxu-switch-name-highlight-tune-20260906.yml
-
       - name: Commit
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Rename multi-line switch and refine highlight"
-          git push origin main
+          git commit -m "Polish switch UI and narrow H3 asset menu"
+          git push
