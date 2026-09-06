@@ -220,7 +220,7 @@ function drawHighlightedLink(ctx, start, end, color, baseWidth) {
   if (makeLinkPath(ctx, start, end)) {
     ctx.strokeStyle = color;
     ctx.globalAlpha = 0.96;
-    ctx.lineWidth = (width + 2.5) * 1.3;
+    ctx.lineWidth = (width + 2.5) * 1.56;
     ctx.stroke();
   }
 
