@@ -60,7 +60,7 @@ class H3PromptEditor(io.ComfyNode):
 
         return io.Schema(
             node_id="TerryXuH3PromptEditor",
-            display_name="TerryXu | H3 提示词编辑器",
+            display_name="H3 提示词编辑器",
             category="TerryXu/Text",
             search_aliases=["MiniMax H3", "H3 prompt", "H3 提示词", "reference prompt"],
             description=(

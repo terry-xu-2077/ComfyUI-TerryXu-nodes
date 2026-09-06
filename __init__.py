@@ -3,11 +3,8 @@ from typing_extensions import override
 
 from .nodes import (
     BoolSwitch,
-    DateFormatter,
-    FileSave,
     H3PromptEditor,
     LineSwitch,
-    VideoCompare,
 )
 
 WEB_DIRECTORY = "./web"
@@ -24,10 +21,7 @@ class TerryXuExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
-            FileSave,
-            DateFormatter,
-            VideoCompare,
-            H3PromptEditor,
+                                    H3PromptEditor,
             LineSwitch,
             BoolSwitch,
         ]

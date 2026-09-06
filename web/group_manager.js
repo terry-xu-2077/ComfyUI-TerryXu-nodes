@@ -26,7 +26,7 @@ function isChinese() {
 function labels() {
   return isChinese()
     ? {
-        title: "TerryXu 分组开关",
+        title: "🎛️ 分组开关",
         description: "手动选择工作流分组，独立启用或旁路每个分组内的节点。",
         category: "TerryXu/工作流管理",
         choose: "选择分组…",
@@ -38,7 +38,7 @@ function labels() {
         navigate: "跳转到分组",
       }
     : {
-        title: "TerryXu Group Manager",
+        title: "🎛️ Group Manager",
         description: "Choose workflow groups manually and enable or bypass their nodes independently.",
         category: "TerryXu/Workflow Management",
         choose: "Select a group…",

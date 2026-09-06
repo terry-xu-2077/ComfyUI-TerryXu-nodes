@@ -3,78 +3,169 @@
     "display_name": "TerryXu 文件保存",
     "description": "一个输入端接收 VIDEO / STRING / IMAGE / AUDIO，按真实输入类型自动显示保存参数，并支持内部或外部文件名以及可选尾部序号。",
     "inputs": {
-      "data": {"name": "内容", "tooltip": "支持 VIDEO / STRING / IMAGE / AUDIO。"},
-      "filename": {"name": "文件名"},
-      "filename_input": {"name": "文件名", "tooltip": "可连接外部 STRING；连接后优先使用外部文件名。"},
-      "append_sequence": {"name": "尾部添加序号"},
-      "image_compress_level": {"name": "PNG 压缩等级"},
-      "audio_format": {"name": "音频格式"},
-      "audio_quality": {"name": "音频质量"},
-      "video_format": {"name": "视频容器"},
-      "video_codec": {"name": "视频编码"},
-      "video_encoding": {"name": "H.264 编码模式"},
-      "video_crf": {"name": "H.264 CRF"},
-      "text_extension": {"name": "文本后缀"},
-      "text_custom_extension": {"name": "自定义文本后缀"}
+      "data": {
+        "name": "内容",
+        "tooltip": "支持 VIDEO / STRING / IMAGE / AUDIO。"
+      },
+      "filename": {
+        "name": "文件名"
+      },
+      "filename_input": {
+        "name": "文件名",
+        "tooltip": "可连接外部 STRING；连接后优先使用外部文件名。"
+      },
+      "append_sequence": {
+        "name": "尾部添加序号"
+      },
+      "image_compress_level": {
+        "name": "PNG 压缩等级"
+      },
+      "audio_format": {
+        "name": "音频格式"
+      },
+      "audio_quality": {
+        "name": "音频质量"
+      },
+      "video_format": {
+        "name": "视频容器"
+      },
+      "video_codec": {
+        "name": "视频编码"
+      },
+      "video_encoding": {
+        "name": "H.264 编码模式"
+      },
+      "video_crf": {
+        "name": "H.264 CRF"
+      },
+      "text_extension": {
+        "name": "文本后缀"
+      },
+      "text_custom_extension": {
+        "name": "自定义文本后缀"
+      }
     }
   },
   "TerryXuDateFormatter": {
     "display_name": "TerryXu 日期格式化",
     "inputs": {
-      "template": {"name": "文本模板"},
-      "format": {"name": "格式"}
+      "template": {
+        "name": "文本模板"
+      },
+      "format": {
+        "name": "格式"
+      }
     },
-    "outputs": {"0": {"name": "格式化文本"}}
+    "outputs": {
+      "0": {
+        "name": "格式化文本"
+      }
+    }
   },
   "TerryXuVideoCompare": {
     "display_name": "TerryXu 视频对比",
     "description": "A/B 双路视频同步对比预览。拖动中间分割线观察画面差异；底部时间轴同步控制两路视频。",
-    "inputs": {"a": {"name": "A"}, "b": {"name": "B"}},
-    "outputs": {"0": {"name": "A"}, "1": {"name": "B"}}
+    "inputs": {
+      "a": {
+        "name": "A"
+      },
+      "b": {
+        "name": "B"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "A"
+      },
+      "1": {
+        "name": "B"
+      }
+    }
   },
   "TerryXuGroupManager": {
-    "display_name": "TerryXu 分组开关",
+    "display_name": "🎛️ 分组开关",
     "description": "手动选择工作流分组，并分别启用或旁路每个分组中的节点。"
   },
   "TerryXuH3PromptEditor": {
-    "display_name": "TerryXu H3 提示词编辑器",
+    "display_name": "H3 提示词编辑器",
     "description": "可视化编写 MiniMax H3 提示词；支持动态数量图片、视频、音频参考；@ 插入媒体，/ 打开 H3 语法菜单；输出始终为标准 H3 原文 STRING。",
     "inputs": {
-      "prompt": {"name": "H3 原文"},
-      "visual_preview": {"name": "可视化预览", "tooltip": "开启：标签可视化；关闭：显示纯文本 H3 原文。"},
-      "asset": {"name": "参考", "tooltip": "可连接 IMAGE / VIDEO / AUDIO 参考。"}
+      "prompt": {
+        "name": "H3 原文"
+      },
+      "visual_preview": {
+        "name": "可视化预览",
+        "tooltip": "开启：标签可视化；关闭：显示纯文本 H3 原文。"
+      },
+      "asset": {
+        "name": "参考",
+        "tooltip": "可连接 IMAGE / VIDEO / AUDIO 参考。"
+      }
     },
-    "outputs": {"0": {"name": "H3 Prompt"}}
+    "outputs": {
+      "0": {
+        "name": "H3 Prompt"
+      }
+    }
   },
   "TerryXuH3ShotTimeline": {
     "display_name": "TerryXu H3 提示词编辑器（时间轴）",
     "description": "TerryXu H3 提示词编辑器的时间轴模式：支持多路参考素材、标签化镜头描述、镜头增删/排序/拖动接缝调时长，以及可选 overall_soundscape / non_diegetic_music。",
     "inputs": {
-      "compiled_prompt": {"name": "H3 时间轴原文"},
-      "duration": {"name": "总时长"},
-      "timeline_state": {"name": "时间轴状态"},
-      "asset": {"name": "参考", "tooltip": "可连接 IMAGE / VIDEO / AUDIO 参考。"}
+      "compiled_prompt": {
+        "name": "H3 时间轴原文"
+      },
+      "duration": {
+        "name": "总时长"
+      },
+      "timeline_state": {
+        "name": "时间轴状态"
+      },
+      "asset": {
+        "name": "参考",
+        "tooltip": "可连接 IMAGE / VIDEO / AUDIO 参考。"
+      }
     },
-    "outputs": {"0": {"name": "H3 Prompt"}}
+    "outputs": {
+      "0": {
+        "name": "H3 Prompt"
+      }
+    }
   },
   "TerryXuWireBusPack": {
-    "display_name": "总线-入",
+    "display_name": "↔️ 总线-入",
     "description": "将任意数量、任意类型的连接汇总为一根虚拟总线，支持 KJNodes Get/Set。",
-    "inputs": {"wire": {"name": "添加线束"}},
-    "outputs": {"0": {"name": "总线"}}
+    "inputs": {
+      "wire": {
+        "name": "添加线束"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "总线"
+      }
+    }
   },
   "TerryXuWireBusUnpack": {
-    "display_name": "总线-出",
+    "display_name": "↔️ 总线-出",
     "description": "从虚拟总线自动恢复原始连接的数量、类型和顺序，支持 KJNodes Get/Set。",
-    "inputs": {"bus": {"name": "总线"}}
+    "inputs": {
+      "bus": {
+        "name": "总线"
+      }
+    }
   },
   "TerryXuWirelessBusPack": {
-    "display_name": "总线-入",
+    "display_name": "↔️ 总线-入",
     "description": "将多路连接发布到独立的 TerryXu 无线总线频道，不与 KJNodes Get/Set 混用。",
-    "inputs": {"wire": {"name": "添加线束"}}
+    "inputs": {
+      "wire": {
+        "name": "添加线束"
+      }
+    }
   },
   "TerryXuWirelessBusUnpack": {
-    "display_name": "总线-出",
+    "display_name": "↔️ 总线-出",
     "description": "选择 TerryXu 无线总线频道，自动恢复对应的多路连接。"
   }
 }

@@ -3,78 +3,169 @@
     "display_name": "TerryXu File Save",
     "description": "Save VIDEO / STRING / IMAGE / AUDIO from one input with type-aware controls, internal or external filenames, and an optional sequence suffix.",
     "inputs": {
-      "data": {"name": "Content", "tooltip": "Supports VIDEO / STRING / IMAGE / AUDIO."},
-      "filename": {"name": "Filename"},
-      "filename_input": {"name": "Filename", "tooltip": "Connect an external STRING; when connected it overrides the internal filename."},
-      "append_sequence": {"name": "Append sequence"},
-      "image_compress_level": {"name": "PNG compression level"},
-      "audio_format": {"name": "Audio format"},
-      "audio_quality": {"name": "Audio quality"},
-      "video_format": {"name": "Video container"},
-      "video_codec": {"name": "Video codec"},
-      "video_encoding": {"name": "H.264 encoding mode"},
-      "video_crf": {"name": "H.264 CRF"},
-      "text_extension": {"name": "Text extension"},
-      "text_custom_extension": {"name": "Custom text extension"}
+      "data": {
+        "name": "Content",
+        "tooltip": "Supports VIDEO / STRING / IMAGE / AUDIO."
+      },
+      "filename": {
+        "name": "Filename"
+      },
+      "filename_input": {
+        "name": "Filename",
+        "tooltip": "Connect an external STRING; when connected it overrides the internal filename."
+      },
+      "append_sequence": {
+        "name": "Append sequence"
+      },
+      "image_compress_level": {
+        "name": "PNG compression level"
+      },
+      "audio_format": {
+        "name": "Audio format"
+      },
+      "audio_quality": {
+        "name": "Audio quality"
+      },
+      "video_format": {
+        "name": "Video container"
+      },
+      "video_codec": {
+        "name": "Video codec"
+      },
+      "video_encoding": {
+        "name": "H.264 encoding mode"
+      },
+      "video_crf": {
+        "name": "H.264 CRF"
+      },
+      "text_extension": {
+        "name": "Text extension"
+      },
+      "text_custom_extension": {
+        "name": "Custom text extension"
+      }
     }
   },
   "TerryXuDateFormatter": {
     "display_name": "TerryXu Date Formatter",
     "inputs": {
-      "template": {"name": "Text template"},
-      "format": {"name": "Format"}
+      "template": {
+        "name": "Text template"
+      },
+      "format": {
+        "name": "Format"
+      }
     },
-    "outputs": {"0": {"name": "Formatted text"}}
+    "outputs": {
+      "0": {
+        "name": "Formatted text"
+      }
+    }
   },
   "TerryXuVideoCompare": {
     "display_name": "TerryXu Video Compare",
     "description": "A/B synchronized video comparison preview. Drag the center divider to inspect differences; the bottom timeline controls both videos together.",
-    "inputs": {"a": {"name": "A"}, "b": {"name": "B"}},
-    "outputs": {"0": {"name": "A"}, "1": {"name": "B"}}
+    "inputs": {
+      "a": {
+        "name": "A"
+      },
+      "b": {
+        "name": "B"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "A"
+      },
+      "1": {
+        "name": "B"
+      }
+    }
   },
   "TerryXuGroupManager": {
-    "display_name": "TerryXu Group Manager",
+    "display_name": "🎛️ Group Manager",
     "description": "Manually select workflow groups and independently enable or bypass the nodes inside each group."
   },
   "TerryXuH3PromptEditor": {
-    "display_name": "TerryXu H3 Prompt Editor",
+    "display_name": "H3 Prompt Editor",
     "description": "Visual MiniMax H3 prompt editor with dynamic image, video and audio references. Use @ for media and / for H3 syntax commands; output is always standard H3 STRING text.",
     "inputs": {
-      "prompt": {"name": "H3 Source"},
-      "visual_preview": {"name": "Visual Preview", "tooltip": "On: visualize tags. Off: show raw H3 text."},
-      "asset": {"name": "Reference", "tooltip": "Connect IMAGE / VIDEO / AUDIO references."}
+      "prompt": {
+        "name": "H3 Source"
+      },
+      "visual_preview": {
+        "name": "Visual Preview",
+        "tooltip": "On: visualize tags. Off: show raw H3 text."
+      },
+      "asset": {
+        "name": "Reference",
+        "tooltip": "Connect IMAGE / VIDEO / AUDIO references."
+      }
     },
-    "outputs": {"0": {"name": "H3 Prompt"}}
+    "outputs": {
+      "0": {
+        "name": "H3 Prompt"
+      }
+    }
   },
   "TerryXuH3ShotTimeline": {
     "display_name": "TerryXu H3 Prompt Editor (Timeline)",
     "description": "Timeline mode of TerryXu H3 Prompt Editor with multi-reference assets, tagged shot descriptions, shot ordering and duration editing, plus optional soundscape/music fields.",
     "inputs": {
-      "compiled_prompt": {"name": "H3 Timeline Source"},
-      "duration": {"name": "Total Duration"},
-      "timeline_state": {"name": "Timeline State"},
-      "asset": {"name": "Reference", "tooltip": "Connect IMAGE / VIDEO / AUDIO references."}
+      "compiled_prompt": {
+        "name": "H3 Timeline Source"
+      },
+      "duration": {
+        "name": "Total Duration"
+      },
+      "timeline_state": {
+        "name": "Timeline State"
+      },
+      "asset": {
+        "name": "Reference",
+        "tooltip": "Connect IMAGE / VIDEO / AUDIO references."
+      }
     },
-    "outputs": {"0": {"name": "H3 Prompt"}}
+    "outputs": {
+      "0": {
+        "name": "H3 Prompt"
+      }
+    }
   },
   "TerryXuWireBusPack": {
-    "display_name": " Bus-In",
+    "display_name": "↔️ Bus-In",
     "description": "Bundle any number of connections into one virtual bus. Supports KJNodes Get/Set.",
-    "inputs": {"wire": {"name": "Add Wire"}},
-    "outputs": {"0": {"name": "Bus"}}
+    "inputs": {
+      "wire": {
+        "name": "Add Wire"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Bus"
+      }
+    }
   },
   "TerryXuWireBusUnpack": {
-    "display_name": " Bus-Out",
+    "display_name": "↔️ Bus-Out",
     "description": "Restore the original connection count, types and order from a virtual bus. Supports KJNodes Get/Set.",
-    "inputs": {"bus": {"name": "Bus"}}
+    "inputs": {
+      "bus": {
+        "name": "Bus"
+      }
+    }
   },
   "TerryXuWirelessBusPack": {
-    "display_name": " Bus-In",
+    "display_name": "↔️ Bus-In",
     "description": "Publish multiple connections to an independent TerryXu wireless bus channel.",
-    "inputs": {"wire": {"name": "Add Wire"}}
+    "inputs": {
+      "wire": {
+        "name": "Add Wire"
+      }
+    }
   },
   "TerryXuWirelessBusUnpack": {
-    "display_name": " Bus-Out",
+    "display_name": "↔️ Bus-Out",
     "description": "Select a TerryXu wireless bus channel and restore all of its connections."
   }
 }
