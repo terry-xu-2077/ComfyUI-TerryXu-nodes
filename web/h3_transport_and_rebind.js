@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { openH3AssetMenuForChip } from "./h3_shared_menus.js";
 import { api } from "../../scripts/api.js";
 
 const NODE_ID = "TerryXuH3PromptEditor";
@@ -265,6 +266,11 @@ function bindEditor(node) {
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation?.();
+    if (info.type === "picture" || info.type === "video" || info.type === "audio") {
+      closePicker(node);
+      openH3AssetMenuForChip(editor, chip);
+      return;
+    }
     openPicker(node, chip, info);
   }, true);
   return true;

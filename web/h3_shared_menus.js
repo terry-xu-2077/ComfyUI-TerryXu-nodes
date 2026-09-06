@@ -304,15 +304,11 @@ function openSubjectSourceMenu(controller, hit, subjectNumber) {
   placeMenu(menu, controller.editor, 470, 560);
 }
 
-function openAssetMenu(controller) {
-  const { node, editor, mode } = controller;
-  const hit = caretRange(editor, "@");
-  if (!hit) { closeMenu(controller); return false; }
-  closeMenu(controller);
-
+function buildAssetMenu(controller, query = "", onSelect = null) {
+  const { node, mode } = controller;
   const allAssets = assets(node, mode);
   const visible = allAssets.filter((asset) =>
-    !hit.query || `${asset.name} ${asset.label} ${asset.displayLabel} ${asset.kind}`.toLowerCase().includes(hit.query)
+    !query || `${asset.name} ${asset.label} ${asset.displayLabel} ${asset.kind}`.toLowerCase().includes(query)
   );
 
   const menu = document.createElement("div");
@@ -330,7 +326,7 @@ function openAssetMenu(controller) {
   menu.append(legend);
 
   for (const asset of visible) {
-    menu.append(makeAssetRow(asset, asset.displayLabel, () => insertMediaReference(controller, hit, asset)));
+    menu.append(makeAssetRow(asset, asset.displayLabel, () => onSelect?.(asset)));
   }
   if (!visible.length) {
     const empty = document.createElement("div");
@@ -338,7 +334,43 @@ function openAssetMenu(controller) {
     empty.textContent = allAssets.length ? "没有匹配的参考资产。" : "还没有连接图片、视频或音频参考。";
     menu.append(empty);
   }
+  return menu;
+}
+
+function placeAssetMenuAtElement(menu, anchor) {
+  const rect = anchor?.getBoundingClientRect?.();
+  if (!rect) return;
+  const width = 295;
+  const measuredHeight = Math.min(520, menu.offsetHeight || 400);
+  let left = rect.left, top = rect.bottom + 6;
+  if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+  if (top + measuredHeight > window.innerHeight - 8) top = Math.max(8, rect.top - measuredHeight - 6);
+  Object.assign(menu.style, { position: "fixed", left: `${Math.max(8, Math.round(left))}px`, top: `${Math.max(8, Math.round(top))}px`, zIndex: "2147483000", isolation: "isolate", pointerEvents: "auto" });
+}
+
+function openAssetMenu(controller) {
+  const { editor } = controller;
+  const hit = caretRange(editor, "@");
+  if (!hit) { closeMenu(controller); return false; }
+  closeMenu(controller);
+  const menu = buildAssetMenu(controller, hit.query, (asset) => insertMediaReference(controller, hit, asset));
   placeMenu(menu, editor, 295, 520);
+  return true;
+}
+
+export function openH3AssetMenuForChip(editor, chip) {
+  const controller = controllers.get(editor);
+  if (!controller || !chip || !editor?.contains?.(chip)) return false;
+  closeMenu(controller);
+  const menu = buildAssetMenu(controller, "", (asset) => {
+    const token = createToken(controller, asset.raw, asset);
+    chip.replaceWith(token);
+    controller.onChange?.();
+    editor.dispatchEvent(new Event("terrychange", { bubbles: true }));
+    editor.focus({ preventScroll: true });
+    closeMenu(controller);
+  });
+  placeAssetMenuAtElement(menu, chip);
   return true;
 }
 
