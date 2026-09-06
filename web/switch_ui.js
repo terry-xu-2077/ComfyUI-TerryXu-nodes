@@ -6,6 +6,7 @@ const REMOTE_TYPE = "TerryXuRemoteControl";
 const LINE_NAMES_PROPERTY = "terry_line_switch_names";
 const BOOL_NAMES_PROPERTY = "terry_bool_switch_names";
 const INDEX_PROPERTY = "terry_line_switch_index";
+const BOOL_PROPERTY = "terry_bool_switch_state";
 const CHANNEL_PROPERTY = "terry_control_channel";
 const REMOTE_CHANNEL_PROPERTY = "terry_remote_channel";
 const ROUTE_MENU_WIDGET = "terry_route_menu";
@@ -62,12 +63,27 @@ function numericIndex(node) {
   const native = widget(node, "index");
   return clampIndex(p[INDEX_PROPERTY] ?? native?.value ?? 1, routes(node).length);
 }
+function connectedRouteEntries(node) {
+  return routes(node)
+    .map((slot, i) => ({ slot, index: i + 1 }))
+    .filter(({ slot }) => slot?.link != null);
+}
 function displayValues(node) {
-  const rs = routes(node);
-  if (!rs.length) return [`1 · ${labels().route} 1`];
-  return rs.map((slot, i) => `${i + 1} · ${routeName(node, slot, i)}`);
+  return connectedRouteEntries(node).map(
+    ({ slot, index }) => `${index} · ${routeName(node, slot, index - 1)}`
+  );
 }
 function displayIndex(value) { return clampIndex(String(value || "").split("·", 1)[0], 9999); }
+function displayValueForIndex(node, index) {
+  const prefix = `${Number(index) || 1} ·`;
+  return displayValues(node).find((value) => String(value).startsWith(prefix)) || "";
+}
+function selectableIndex(node) {
+  const current = numericIndex(node);
+  const entries = connectedRouteEntries(node);
+  if (!entries.length || entries.some((entry) => entry.index === current)) return current;
+  return entries[0].index;
+}
 
 function hideNativeIndex(node) {
   if (!isLine(node)) return;
@@ -106,10 +122,19 @@ function setIndex(node, next) {
 function ensureRouteMenu(node) {
   if (!isLine(node)) return null;
   hideNativeIndex(node);
+  const values = displayValues(node);
+  const current = numericIndex(node);
+  const selected = selectableIndex(node);
+  if (selected !== current) {
+    const native = widget(node, "index");
+    if (native) native.value = selected;
+    props(node)[INDEX_PROPERTY] = selected;
+    node.__terryRuntimeIndex = selected;
+  }
   let menu = widget(node, ROUTE_MENU_WIDGET);
   if (!menu) {
-    const values = displayValues(node);
-    menu = node.addWidget?.("combo", ROUTE_MENU_WIDGET, values[numericIndex(node) - 1] || values[0], (value) => {
+    const initial = displayValueForIndex(node, selected) || values[0] || "";
+    menu = node.addWidget?.("combo", ROUTE_MENU_WIDGET, initial, (value) => {
       setIndex(node, displayIndex(value));
     }, { values });
     if (menu) {
@@ -120,7 +145,6 @@ function ensureRouteMenu(node) {
     }
   }
   if (!menu) return null;
-  const values = displayValues(node);
   const signature = values.join("\u0001");
   if (menu.__terryValuesSignature !== signature) {
     menu.options ||= {};
@@ -128,22 +152,40 @@ function ensureRouteMenu(node) {
     menu.__terryValuesSignature = signature;
   }
   menu.label = labels().route;
-  const shown = values[numericIndex(node) - 1] || values[0];
+  const shown = displayValueForIndex(node, selected) || values[0] || "";
   if (menu.value !== shown) menu.value = shown;
   return menu;
 }
 
+function nodes2Root(node) {
+  if (typeof document === "undefined") return null;
+  return [...document.querySelectorAll("[data-node-id]")]
+    .find((element) => String(element.getAttribute("data-node-id")) === String(node?.id)) || null;
+}
+function syncNodes2InputLabels(node) {
+  const root = nodes2Root(node);
+  if (!root) return;
+  const rows = [...root.querySelectorAll(".lg-slot--input")]
+    .filter((row) => String(row.textContent || "").includes("✎"));
+  const entries = renameEntries(node);
+  rows.forEach((row, index) => {
+    const entry = entries[index];
+    const span = row.querySelector(".text-node-component-slot-text");
+    if (entry && span) span.textContent = `${entry.label}   ✎`;
+  });
+}
 function syncLineLabels(node) {
   routes(node).forEach((slot, i) => {
-    // Core renderer draws this label in both classic and Nodes 2.0, so the rename affordance stays visible.
     slot.label = `${routeName(node, slot, i)}   ✎`;
   });
+  queueMicrotask(() => syncNodes2InputLabels(node));
 }
 function syncBoolLabels(node) {
   const off = input(node, "input_false");
   const on = input(node, "input_true");
   if (off) off.label = `${boolName(node, false)}   ✎`;
   if (on) on.label = `${boolName(node, true)}   ✎`;
+  queueMicrotask(() => syncNodes2InputLabels(node));
 }
 function syncLine(node) { if (!isLine(node)) return; hideNativeIndex(node); syncLineLabels(node); ensureRouteMenu(node); }
 function syncBool(node) { if (!isBool(node)) return; syncBoolLabels(node); }
@@ -222,6 +264,7 @@ function installNodes2RenameHandler() {
     if (next == null) return;
     entry.set(next);
     if (isLine(node)) syncLine(node); else syncBool(node);
+    syncNodes2InputLabels(node);
     syncRemotes();
     node.graph?.setDirtyCanvas?.(true, true);
     node.graph?.change?.();
@@ -247,12 +290,18 @@ function targetForRemote(remote) {
   const c = remoteChannel(remote);
   return c ? nodes().find((n) => (isLine(n) || isBool(n)) && channel(n) === c) || null : null;
 }
+function boolState(node) {
+  const control = widget(node, "enabled");
+  if (control?.value !== undefined) return Boolean(control.value);
+  return Boolean(props(node)[BOOL_PROPERTY]);
+}
 function syncRemote(remote) {
   if (!isRemote(remote)) return;
   const target = targetForRemote(remote), w = widget(remote, REMOTE_VALUE_WIDGET);
   if (!target || !w) return;
   if (isLine(target)) {
-    const values = displayValues(target), shown = values[numericIndex(target) - 1] || values[0];
+    const values = displayValues(target);
+    const shown = displayValueForIndex(target, selectableIndex(target)) || values[0] || "";
     w.type = "combo"; w.options ||= {}; w.options.values = values; w.value = shown; w.label = labels().route;
     if (!w.__terryNamedCallbackWrapped) {
       const old = w.callback;
@@ -264,7 +313,7 @@ function syncRemote(remote) {
       w.__terryNamedCallbackWrapped = true;
     }
   } else if (isBool(target)) {
-    w.label = `${boolName(target, false)} / ${boolName(target, true)}`;
+    w.label = boolName(target, boolState(target));
   }
 }
 function syncRemotes() { for (const n of nodes()) if (isRemote(n)) syncRemote(n); }
