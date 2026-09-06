@@ -635,7 +635,7 @@ export function installH3RichTextStyles() {
   style.textContent = `
 .terry-h3-chip{display:inline-flex;align-items:center;gap:4px;margin:1px 2px;padding:1px 5px;border-radius:4px;border:1px solid transparent;background:rgba(255,255,255,.08);font-size:10px;white-space:nowrap;vertical-align:middle;transition:background .12s,border-color .12s,color .12s,box-shadow .12s}
 .terry-h3-chip img{width:24px;height:24px;object-fit:cover;border-radius:3px}
-.terry-h3-type-section{display:inline!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:rgba(205,205,205,.66)!important;font-weight:700!important;font-size:12px!important}
+.terry-h3-type-section{display:inline!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:rgba(218,218,218,.76)!important;font-weight:700!important;font-size:13px!important;letter-spacing:.1px!important}
 .terry-h3-type-subject{background:rgba(180,140,255,.13)!important;color:rgb(220,202,255)!important;box-shadow:inset 0 0 0 1px rgba(180,140,255,.25)!important}
 .terry-h3-type-picture{background:rgba(0,210,180,.12)!important;color:rgb(184,255,242)!important;box-shadow:inset 0 0 0 1px rgba(0,210,180,.24)!important}
 .terry-h3-type-video{background:rgba(76,170,255,.13)!important;color:rgb(194,226,255)!important;box-shadow:inset 0 0 0 1px rgba(76,170,255,.25)!important}
