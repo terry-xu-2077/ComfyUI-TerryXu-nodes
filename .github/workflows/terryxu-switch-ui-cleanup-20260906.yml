@@ -1,0 +1,196 @@
+name: TerryXu switch UI cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-switch-ui-cleanup-20260906.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply naming and Nodes 2.0 fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path, text):
+              Path(path).write_text(text, encoding="utf-8")
+
+          def rep(path, old, new, count=1):
+              text = read(path)
+              if old not in text:
+                  raise RuntimeError(f"anchor not found in {path}: {old!r}")
+              write(path, text.replace(old, new, count))
+
+          # Visible switch node names: concise, no TerryXu prefix.
+          rep("nodes/line_switch.py", 'display_name="TerryXu 线路切换器"', 'display_name="线路切换器"')
+          rep("nodes/bool_switch.py", 'display_name="TerryXu 二路布尔切换器"', 'display_name="二路切换器"')
+          rep(
+              "nodes/bool_switch.py",
+              'description="使用布尔值在两路任意同类型输入之间切换，可通过 TerryXu 远程控制器按频道控制。"',
+              'description="使用布尔值在两路任意同类型输入之间切换，可通过远程控制器按名称控制。"',
+          )
+          rep("nodes/bool_switch.py", 'display_name="关闭"', 'display_name="线路 1"')
+          rep("nodes/bool_switch.py", 'display_name="开启"', 'display_name="线路 2"')
+
+          # Runtime/UI naming. Remove the visible “频道/Channel” label entirely.
+          replacements = [
+              ('lineTitle: "TerryXu 线路切换器",', 'lineTitle: "线路切换器",'),
+              ('boolTitle: "TerryXu 二路布尔切换器",', 'boolTitle: "二路切换器",'),
+              ('remoteTitle: "TerryXu 远程控制器",', 'remoteTitle: "远程控制器",'),
+              ('falseInput: "关闭",', 'falseInput: "线路 1",'),
+              ('trueInput: "开启",', 'trueInput: "线路 2",'),
+              ('channel: "频道",', 'channel: "",'),
+              ('boolChannel: "布尔切换",', 'boolChannel: "二路切换",'),
+              ('remoteDescription: "按频道自动识别 TerryXu 节点控件，并生成对应的远程控制界面。",', 'remoteDescription: "按名称自动匹配可控节点，并生成对应的远程控制界面。",'),
+              ('lineTitle: "TerryXu Line Switch",', 'lineTitle: "Line Switch",'),
+              ('boolTitle: "TerryXu Boolean Switch",', 'boolTitle: "Two-Way Switch",'),
+              ('remoteTitle: "TerryXu Remote Control",', 'remoteTitle: "Remote Control",'),
+              ('falseInput: "Off",', 'falseInput: "Input 1",'),
+              ('trueInput: "On",', 'trueInput: "Input 2",'),
+              ('channel: "Channel",', 'channel: "",'),
+              ('boolChannel: "Boolean Switch",', 'boolChannel: "Two-Way Switch",'),
+              ('remoteDescription: "Detect TerryXu node controls by channel and build a matching remote control UI.",', 'remoteDescription: "Match controllable nodes by name and build the corresponding remote control UI.",'),
+          ]
+          for old, new in replacements:
+              rep("web/line_switch.js", old, new)
+
+          # Rename labels for the two-way switch are route names, not boolean state names.
+          rep(
+              "web/switch_ui.js",
+              '? { route: "线路", off: "关闭", on: "开启", rename: "重命名线路" }',
+              '? { route: "线路", input1: "线路 1", input2: "线路 2", rename: "重命名线路" }',
+          )
+          rep(
+              "web/switch_ui.js",
+              ': { route: "Route", off: "Off", on: "On", rename: "Rename route" };',
+              ': { route: "Route", input1: "Input 1", input2: "Input 2", rename: "Rename route" };',
+          )
+          rep(
+              "web/switch_ui.js",
+              'return String(boolNames(node)[enabled ? "true" : "false"] || "").trim() || (enabled ? labels().on : labels().off);',
+              'return String(boolNames(node)[enabled ? "true" : "false"] || "").trim() || (enabled ? labels().input2 : labels().input1);',
+          )
+
+          # Nodes 2.0 renders inputs as DOM rows and does not route label clicks through
+          # LiteGraph node.onMouseDown. Add one delegated handler for rows that contain
+          # our pencil marker. Socket clicks are explicitly excluded.
+          anchor = '''function allGraphs(root = app.graph) {'''
+          handler = '''function installNodes2RenameHandler() {
+            if (typeof document === "undefined" || globalThis.__terrySwitchNodes2RenameHandler) return;
+            globalThis.__terrySwitchNodes2RenameHandler = true;
+            document.addEventListener("pointerdown", (event) => {
+              if (event.button != null && event.button !== 0) return;
+              const target = event.target;
+              if (!target?.closest) return;
+              if (target.closest('[data-testid="slot-connection-dot"], [data-testid="slot-dot"]')) return;
+              const row = target.closest(".lg-slot--input");
+              const root = row?.closest?.("[data-node-id]");
+              if (!row || !root || !String(row.textContent || "").includes("✎")) return;
+
+              const id = root.getAttribute("data-node-id");
+              const node = nodes().find((item) => String(item?.id) === String(id));
+              if (!node || (!isLine(node) && !isBool(node))) return;
+
+              const editableRows = [...root.querySelectorAll(".lg-slot--input")]
+                .filter((item) => String(item.textContent || "").includes("✎"));
+              const entry = renameEntries(node)[editableRows.indexOf(row)];
+              if (!entry) return;
+
+              event.preventDefault?.();
+              event.stopPropagation?.();
+              const next = globalThis.prompt?.(labels().rename, entry.label);
+              if (next == null) return;
+              entry.set(next);
+              if (isLine(node)) syncLine(node); else syncBool(node);
+              syncRemotes();
+              node.graph?.setDirtyCanvas?.(true, true);
+              node.graph?.change?.();
+            }, true);
+          }
+
+          function allGraphs(root = app.graph) {'''
+          text = read("web/switch_ui.js")
+          if anchor not in text:
+              raise RuntimeError("switch_ui allGraphs anchor not found")
+          write("web/switch_ui.js", text.replace(anchor, handler, 1))
+
+          rep(
+              "web/switch_ui.js",
+              '''  setup() {
+                globalThis.__terrySyncSwitchUI = (node) => {''',
+              '''  setup() {
+                installNodes2RenameHandler();
+                globalThis.__terrySyncSwitchUI = (node) => {''',
+          )
+
+          # Remove all remaining bus title emoji, including dormant legacy labels/locales.
+          for path in ("web/wire_bus.js", "locales/zh/nodeDefs.json", "locales/en/nodeDefs.json"):
+              text = read(path)
+              text = text.replace("⛓️‍💥", "").replace("🔗", "")
+              write(path, text)
+
+          # Remove the one-shot workflow itself from the final tree.
+          wf = Path(".github/workflows/terryxu-switch-ui-cleanup-20260906.yml")
+          if wf.exists():
+              wf.unlink()
+          for path in (Path(".github/workflows"), Path(".github")):
+              try:
+                  path.rmdir()
+              except OSError:
+                  pass
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          for p in Path('.').rglob('*.py'):
+              if '.git' not in p.parts:
+                  ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
+
+          line_py = Path('nodes/line_switch.py').read_text(encoding='utf-8')
+          bool_py = Path('nodes/bool_switch.py').read_text(encoding='utf-8')
+          line_js = Path('web/line_switch.js').read_text(encoding='utf-8')
+          sui = Path('web/switch_ui.js').read_text(encoding='utf-8')
+          bus = Path('web/wire_bus.js').read_text(encoding='utf-8')
+          zh = Path('locales/zh/nodeDefs.json').read_text(encoding='utf-8')
+          en = Path('locales/en/nodeDefs.json').read_text(encoding='utf-8')
+
+          assert 'display_name="线路切换器"' in line_py
+          assert 'display_name="二路切换器"' in bool_py
+          assert 'display_name="线路 1"' in bool_py and 'display_name="线路 2"' in bool_py
+          assert 'TerryXu 线路切换器' not in line_js
+          assert 'TerryXu 二路布尔切换器' not in line_js
+          assert 'TerryXu 远程控制器' not in line_js
+          assert 'channel: "频道"' not in line_js and 'channel: "Channel"' not in line_js
+          assert 'installNodes2RenameHandler' in sui
+          assert 'input1: "线路 1"' in sui and 'input2: "线路 2"' in sui
+          for text in (bus, zh, en):
+              assert '⛓️‍💥' not in text and '🔗' not in text
+          PY
+          for f in web/*.js; do node --check "$f"; done
+
+      - name: Commit fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Polish switch names and Nodes 2.0 rename UI"
+          git push origin main
