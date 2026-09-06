@@ -323,10 +323,8 @@ function panelHeight(node) {
 }
 
 function resizeManager(node) {
-  const measured = node.computeSize?.();
-  if (!measured) return;
-  const width = Math.max(NODE_MIN_WIDTH, Number(node.size?.[0]) || 0, Number(measured[0]) || 0);
-  const height = Number(measured[1]) || panelHeight(node);
+  const width = Math.max(NODE_MIN_WIDTH, Number(node.size?.[0]) || NODE_MIN_WIDTH);
+  const height = Math.max(panelHeight(node), ROW_HEIGHT + PANEL_PADDING * 2);
   if (node.size?.[0] !== width || node.size?.[1] !== height) node.setSize?.([width, height]);
   node.setDirtyCanvas?.(true, true);
 }
@@ -517,6 +515,7 @@ app.registerExtension({
 
   beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData?.name !== NODE_ID) return;
+    nodeType.title = nodeData.display_name || labels().title;
     const created = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       const result = created?.apply(this, arguments);
