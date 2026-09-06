@@ -21,7 +21,7 @@ class TerryXuExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
-                                    H3PromptEditor,
+            H3PromptEditor,
             LineSwitch,
             BoolSwitch,
         ]
