@@ -1,0 +1,177 @@
+name: TerryXu switch active route highlight
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-switch-active-highlight-20260906.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add subtle active-route highlight
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('web/switch_ui.js')
+          text = path.read_text(encoding='utf-8')
+
+          anchor = '''function syncNodes2InputLabels(node) {
+            const root = nodes2Root(node);
+            if (!root) return;
+            const rows = [...root.querySelectorAll(".lg-slot--input")]
+              .filter((row) => String(row.textContent || "").includes("✎"));
+            const entries = renameEntries(node);
+            rows.forEach((row, index) => {
+              const entry = entries[index];
+              const span = row.querySelector(".text-node-component-slot-text");
+              if (entry && span) span.textContent = `${entry.label}   ✎`;
+            });
+          }
+          '''
+          replacement = '''function activeEntryIndex(node) {
+            if (isLine(node)) return Math.max(0, numericIndex(node) - 1);
+            if (isBool(node)) return boolState(node) ? 1 : 0;
+            return -1;
+          }
+
+          function syncNodes2InputLabels(node) {
+            const root = nodes2Root(node);
+            if (!root) return;
+            const rows = [...root.querySelectorAll(".lg-slot--input")]
+              .filter((row) => String(row.textContent || "").includes("✎"));
+            const entries = renameEntries(node);
+            const activeIndex = activeEntryIndex(node);
+            rows.forEach((row, index) => {
+              const entry = entries[index];
+              const span = row.querySelector(".text-node-component-slot-text");
+              if (entry && span) span.textContent = `${entry.label}   ✎`;
+              row.classList.toggle("terry-switch-active-route", index === activeIndex);
+            });
+          }
+          '''
+          if anchor not in text:
+              raise RuntimeError('syncNodes2InputLabels anchor not found')
+          text = text.replace(anchor, replacement, 1)
+
+          anchor2 = '''function syncLineLabels(node) {
+            routes(node).forEach((slot, i) => {
+              slot.label = `${routeName(node, slot, i)}   ✎`;
+            });
+            queueMicrotask(() => syncNodes2InputLabels(node));
+          }
+          function syncBoolLabels(node) {
+            const off = input(node, "input_false");
+            const on = input(node, "input_true");
+            if (off) off.label = `${boolName(node, false)}   ✎`;
+            if (on) on.label = `${boolName(node, true)}   ✎`;
+            queueMicrotask(() => syncNodes2InputLabels(node));
+          }
+          '''
+          replacement2 = '''function markClassicActiveSlots(node, entries, activeIndex) {
+            entries.forEach((slot, index) => {
+              if (!slot) return;
+              if (index === activeIndex) {
+                slot.color_on = "#d8bd67";
+                slot.color_off = "#9f8a4c";
+              } else {
+                delete slot.color_on;
+                delete slot.color_off;
+              }
+            });
+          }
+          function syncLineLabels(node) {
+            const slots = routes(node);
+            slots.forEach((slot, i) => {
+              slot.label = `${routeName(node, slot, i)}   ✎`;
+            });
+            markClassicActiveSlots(node, slots, activeEntryIndex(node));
+            queueMicrotask(() => syncNodes2InputLabels(node));
+          }
+          function syncBoolLabels(node) {
+            const off = input(node, "input_false");
+            const on = input(node, "input_true");
+            if (off) off.label = `${boolName(node, false)}   ✎`;
+            if (on) on.label = `${boolName(node, true)}   ✎`;
+            markClassicActiveSlots(node, [off, on], activeEntryIndex(node));
+            queueMicrotask(() => syncNodes2InputLabels(node));
+          }
+          '''
+          if anchor2 not in text:
+              raise RuntimeError('sync label anchor not found')
+          text = text.replace(anchor2, replacement2, 1)
+
+          anchor3 = '''function installNodes2RenameHandler() {
+            if (typeof document === "undefined" || globalThis.__terrySwitchNodes2RenameHandler) return;
+          '''
+          replacement3 = '''function installSwitchHighlightStyles() {
+            if (typeof document === "undefined" || document.getElementById("terry-switch-active-route-style")) return;
+            const style = document.createElement("style");
+            style.id = "terry-switch-active-route-style";
+            style.textContent = `
+          .lg-slot--input.terry-switch-active-route{
+            background:rgba(216,189,103,.075);
+            box-shadow:inset 2px 0 0 rgba(216,189,103,.58);
+            border-radius:4px;
+          }
+          .lg-slot--input.terry-switch-active-route .text-node-component-slot-text{
+            color:rgba(246,238,207,.96);
+          }
+          `;
+            document.head.append(style);
+          }
+
+          function installNodes2RenameHandler() {
+            if (typeof document === "undefined" || globalThis.__terrySwitchNodes2RenameHandler) return;
+          '''
+          if anchor3 not in text:
+              raise RuntimeError('installNodes2RenameHandler anchor not found')
+          text = text.replace(anchor3, replacement3, 1)
+
+          anchor4 = '''  setup() {
+                installNodes2RenameHandler();
+                globalThis.__terrySyncSwitchUI = (node) => {
+          '''
+          replacement4 = '''  setup() {
+                installSwitchHighlightStyles();
+                installNodes2RenameHandler();
+                globalThis.__terrySyncSwitchUI = (node) => {
+          '''
+          if anchor4 not in text:
+              raise RuntimeError('setup anchor not found')
+          text = text.replace(anchor4, replacement4, 1)
+
+          path.write_text(text, encoding='utf-8')
+
+          wf = Path('.github/workflows/terryxu-switch-active-highlight-20260906.yml')
+          if wf.exists(): wf.unlink()
+          for folder in (Path('.github/workflows'), Path('.github')):
+              try: folder.rmdir()
+              except OSError: pass
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          node --check web/switch_ui.js
+          grep -q 'terry-switch-active-route' web/switch_ui.js
+          grep -q 'markClassicActiveSlots' web/switch_ui.js
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Highlight selected switch routes"
+          git push origin main
