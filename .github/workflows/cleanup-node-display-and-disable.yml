@@ -1,0 +1,112 @@
+name: Clean node display names and disable legacy nodes
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/cleanup-node-display-and-disable.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch registrations and display names
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+
+          # Disable legacy nodes but keep source files for possible future deletion.
+          p = Path('__init__.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('    DateFormatter,\n', '')
+          s = s.replace('    FileSave,\n', '')
+          s = s.replace('    VideoCompare,\n', '')
+          s = s.replace('            FileSave,\n', '')
+          s = s.replace('            DateFormatter,\n', '')
+          s = s.replace('            VideoCompare,\n', '')
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('nodes/__init__.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('from .date_formatter import DateFormatter\n', '')
+          s = s.replace('from .file_save import FileSave\n', '')
+          s = s.replace('from .video_compare import VideoCompare\n', '')
+          s = s.replace('    "DateFormatter",\n', '')
+          s = s.replace('    "FileSave",\n', '')
+          s = s.replace('    "VideoCompare",\n', '')
+          p.write_text(s, encoding='utf-8')
+
+          # H3 active node: remove TerryXu visible prefix.
+          p = Path('nodes/h3_prompt_editor.py')
+          s = p.read_text(encoding='utf-8').replace(
+              'display_name="TerryXu | H3 提示词编辑器"',
+              'display_name="H3 提示词编辑器"',
+          )
+          p.write_text(s, encoding='utf-8')
+
+          # Group manager title gets control icon and no TerryXu prefix.
+          p = Path('web/group_manager.js')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('title: "TerryXu 分组开关"', 'title: "🎛️ 分组开关"')
+          s = s.replace('title: "TerryXu Group Manager"', 'title: "🎛️ Group Manager"')
+          p.write_text(s, encoding='utf-8')
+
+          # Locale display names override runtime names in the node search UI.
+          for lang in ('zh', 'en'):
+              p = Path(f'locales/{lang}/nodeDefs.json')
+              data = json.loads(p.read_text(encoding='utf-8'))
+              if lang == 'zh':
+                  if 'TerryXuGroupManager' in data:
+                      data['TerryXuGroupManager']['display_name'] = '🎛️ 分组开关'
+                  if 'TerryXuH3PromptEditor' in data:
+                      data['TerryXuH3PromptEditor']['display_name'] = 'H3 提示词编辑器'
+                  for key, title in {
+                      'TerryXuWireBusPack': '↔️ 总线-入',
+                      'TerryXuWireBusUnpack': '↔️ 总线-出',
+                      'TerryXuWirelessBusPack': '↔️ 总线-入',
+                      'TerryXuWirelessBusUnpack': '↔️ 总线-出',
+                  }.items():
+                      if key in data:
+                          data[key]['display_name'] = title
+              else:
+                  if 'TerryXuGroupManager' in data:
+                      data['TerryXuGroupManager']['display_name'] = '🎛️ Group Manager'
+                  if 'TerryXuH3PromptEditor' in data:
+                      data['TerryXuH3PromptEditor']['display_name'] = 'H3 Prompt Editor'
+                  for key, title in {
+                      'TerryXuWireBusPack': '↔️ Bus-In',
+                      'TerryXuWireBusUnpack': '↔️ Bus-Out',
+                      'TerryXuWirelessBusPack': '↔️ Bus-In',
+                      'TerryXuWirelessBusUnpack': '↔️ Bus-Out',
+                  }.items():
+                      if key in data:
+                          data[key]['display_name'] = title
+              p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          Path('.github/workflows/cleanup-node-display-and-disable.yml').unlink()
+          PY
+      - name: Validate
+        run: |
+          python -m compileall -q __init__.py nodes
+          node --check web/group_manager.js
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          init = Path('__init__.py').read_text(encoding='utf-8')
+          assert 'FileSave' not in init and 'DateFormatter' not in init and 'VideoCompare' not in init
+          zh = json.loads(Path('locales/zh/nodeDefs.json').read_text(encoding='utf-8'))
+          assert zh['TerryXuWirelessBusPack']['display_name'] == '↔️ 总线-入'
+          assert zh['TerryXuWirelessBusUnpack']['display_name'] == '↔️ 总线-出'
+          assert zh['TerryXuGroupManager']['display_name'] == '🎛️ 分组开关'
+          assert zh['TerryXuH3PromptEditor']['display_name'] == 'H3 提示词编辑器'
+          PY
+      - name: Commit
+        run: |
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Disable legacy nodes and clean display names"
+          git push
