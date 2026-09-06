@@ -87,7 +87,7 @@ function selectedSwitchLinks(graph) {
 
 // Same proven strategy as wire_bus_visual.js: temporarily remove only the
 // selected links during ComfyUI's native pass, then restore them immediately
-// and redraw just those links with a subtle selection treatment.
+// and redraw just those links with a stronger same-color selection treatment.
 function hideLinksForNativeDraw(graph, links) {
   if (!graph || !links?.length) return () => {};
 
@@ -189,30 +189,30 @@ function drawHighlightedLink(ctx, start, end, color, baseWidth) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // Same-color outer glow: intentionally narrow and low-opacity.
+  // Wide soft glow using the line's own type color.
   if (makeLinkPath(ctx, start, end)) {
     ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.32;
-    ctx.lineWidth = width + 1.8;
+    ctx.globalAlpha = 0.42;
+    ctx.lineWidth = width + 5.5;
     ctx.shadowColor = color;
-    ctx.shadowBlur = 5;
+    ctx.shadowBlur = 13;
     ctx.stroke();
   }
 
-  // Thin same-color outline around the original-width core.
+  // Visible same-color halo/outline around the core.
   ctx.shadowBlur = 0;
   if (makeLinkPath(ctx, start, end)) {
     ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.72;
-    ctx.lineWidth = width + 1.15;
+    ctx.globalAlpha = 0.82;
+    ctx.lineWidth = width + 2.4;
     ctx.stroke();
   }
 
-  // Preserve the link's native type color as the actual line color.
+  // Keep the original type color, but make the selected route itself thicker.
   if (makeLinkPath(ctx, start, end)) {
     ctx.strokeStyle = color;
     ctx.globalAlpha = 1;
-    ctx.lineWidth = width;
+    ctx.lineWidth = width + 0.9;
     ctx.stroke();
   }
 
