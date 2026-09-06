@@ -9,7 +9,7 @@ class BoolSwitch(io.ComfyNode):
         value_type = io.MatchType.Template("terry_bool_switch_value")
         return io.Schema(
             node_id="TerryXuBoolSwitch",
-            display_name="二路切换器",
+            display_name="🔀 二路切换器",
             category="TerryXu/线束整理",
             description="使用布尔值在两路任意同类型输入之间切换，可通过远程控制器按名称控制。",
             inputs=[
