@@ -325,7 +325,7 @@ function openAssetMenu(controller) {
   legend.className = "terry-h3-role-legend";
   const title = document.createElement("div");
   title.className = "terry-h3-role-title";
-  title.innerHTML = "<b>引用参考</b><span>仅显示已连接的图片、视频和音频</span>";
+  title.innerHTML = "<b>引用参考</b>";
   legend.append(title);
   menu.append(legend);
 
