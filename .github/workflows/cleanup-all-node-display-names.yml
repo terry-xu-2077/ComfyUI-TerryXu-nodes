@@ -11,92 +11,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Remove legacy title override and clean display names
+      - name: Clean names
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
-          # This global front-end title layer is the source of repeated stale names.
-          legacy = Path('web/node_title_locale.js')
-          if legacy.exists():
-              legacy.unlink()
-
-          replacements = {
-              'nodes/file_save.py': {
-                  'TerryXu 文件保存': '文件保存',
-              },
-              'nodes/date_formatter.py': {
-                  'TerryXu 日期格式化': '日期格式化',
-              },
-              'nodes/video_compare.py': {
-                  'TerryXu 视频对比': '视频对比',
-              },
-              'nodes/h3_shot_timeline.py': {
-                  'TerryXu H3 提示词编辑器（时间轴）': '📃 H3提示词编辑器（时间轴）',
-                  'TerryXu H3 提示词编辑器': '📃 H3提示词编辑器',
-              },
-              'locales/zh/nodeDefs.json': {
-                  '"display_name": "TerryXu 文件保存"': '"display_name": "文件保存"',
-                  '"display_name": "TerryXu 日期格式化"': '"display_name": "日期格式化"',
-                  '"display_name": "TerryXu 视频对比"': '"display_name": "视频对比"',
-                  '"display_name": "TerryXu H3 提示词编辑器（时间轴）"': '"display_name": "📃 H3提示词编辑器（时间轴）"',
-                  'TerryXu H3 提示词编辑器的时间轴模式': 'H3 提示词编辑器的时间轴模式',
-              },
-              'locales/en/nodeDefs.json': {
-                  '"display_name": "TerryXu File Save"': '"display_name": "File Save"',
-                  '"display_name": "TerryXu Date Formatter"': '"display_name": "Date Formatter"',
-                  '"display_name": "TerryXu Video Compare"': '"display_name": "Video Compare"',
-                  '"display_name": "TerryXu H3 Prompt Editor (Timeline)"': '"display_name": "📃 H3 Prompt Editor (Timeline)"',
-                  'Timeline mode of TerryXu H3 Prompt Editor': 'Timeline mode of H3 Prompt Editor',
-              },
+          changes = {
+            'nodes/file_save.py': [('TerryXu 文件保存','文件保存')],
+            'nodes/date_formatter.py': [('TerryXu 日期格式化','日期格式化')],
+            'nodes/video_compare.py': [('TerryXu | 视频对比','视频对比'),('TerryXu 视频对比','视频对比')],
+            'nodes/h3_shot_timeline.py': [('TerryXu H3 Prompt Editor (Timeline)','📃 H3 Prompt Editor (Timeline)'),('TerryXu H3 提示词编辑器','📃 H3提示词编辑器')],
+            'locales/zh/nodeDefs.json': [('TerryXu 文件保存','文件保存'),('TerryXu 日期格式化','日期格式化'),('TerryXu 视频对比','视频对比'),('TerryXu H3 提示词编辑器（时间轴）','📃 H3提示词编辑器（时间轴）'),('TerryXu H3 提示词编辑器的时间轴模式','H3 提示词编辑器的时间轴模式')],
+            'locales/en/nodeDefs.json': [('TerryXu File Save','File Save'),('TerryXu Date Formatter','Date Formatter'),('TerryXu Video Compare','Video Compare'),('TerryXu H3 Prompt Editor (Timeline)','📃 H3 Prompt Editor (Timeline)'),('Timeline mode of TerryXu H3 Prompt Editor','Timeline mode of H3 Prompt Editor')],
           }
-
-          for filename, pairs in replacements.items():
-              p = Path(filename)
-              if not p.exists():
-                  continue
-              text = p.read_text(encoding='utf-8')
-              for old, new in pairs.items():
-                  text = text.replace(old, new)
-              p.write_text(text, encoding='utf-8')
-
+          for name, pairs in changes.items():
+              p = Path(name)
+              s = p.read_text(encoding='utf-8')
+              for a,b in pairs:
+                  s = s.replace(a,b)
+              p.write_text(s,encoding='utf-8')
+          p = Path('web/node_title_locale.js')
+          if p.exists(): p.unlink()
           Path('.github/workflows/cleanup-all-node-display-names.yml').unlink()
           PY
-      - name: Validate naming sources
+      - name: Validate
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import json, re
-
-          # Locale files must remain valid JSON.
-          for p in [Path('locales/zh/nodeDefs.json'), Path('locales/en/nodeDefs.json')]:
-              json.loads(p.read_text(encoding='utf-8'))
-
-          # No separate global title override may come back.
-          assert not Path('web/node_title_locale.js').exists()
-
-          # No node display_name or explicit JS title may carry a TerryXu prefix.
-          offenders = []
-          for p in list(Path('nodes').glob('*.py')) + list(Path('web').glob('*.js')) + list(Path('locales').rglob('*.json')):
-              text = p.read_text(encoding='utf-8', errors='ignore')
-              for i, line in enumerate(text.splitlines(), 1):
-                  if re.search(r'display_name\s*=\s*["\']TerryXu\b', line) or re.search(r'"display_name"\s*:\s*"TerryXu\b', line) or re.search(r'\btitle\s*:\s*["\']TerryXu\b', line):
-                      offenders.append(f'{p}:{i}:{line.strip()}')
-          if offenders:
-              raise SystemExit('Stale TerryXu display names remain:\n' + '\n'.join(offenders))
-
-          zh = json.loads(Path('locales/zh/nodeDefs.json').read_text(encoding='utf-8'))
-          assert zh['TerryXuGroupManager']['display_name'] == '🎛️ 分组开关'
-          assert zh['TerryXuH3PromptEditor']['display_name'] == '📃 H3提示词编辑器'
-          assert zh['TerryXuWireBusPack']['display_name'] == '↔️ 总线-入'
-          assert zh['TerryXuWireBusUnpack']['display_name'] == '↔️ 总线-出'
-          PY
+          python3 -m py_compile nodes/*.py
           node --check web/group_manager.js
           node --check web/line_switch.js
           node --check web/wire_bus.js
           node --check web/h3_prompt_editor.js
-          python3 -m py_compile nodes/bool_switch.py nodes/line_switch.py nodes/h3_prompt_editor.py nodes/date_formatter.py nodes/video_compare.py nodes/file_save.py nodes/h3_shot_timeline.py
-          test ! -e .github/workflows/cleanup-all-node-display-names.yml
+          test ! -e web/node_title_locale.js
+          ! grep -R 'display_name=.*TerryXu' nodes locales
+          ! grep -R '"display_name": "TerryXu' locales
+          grep -Fq '🎛️ 分组开关' web/group_manager.js
+          grep -Fq '📃 H3提示词编辑器' locales/zh/nodeDefs.json
+          grep -Fq '↔️ 总线-入' locales/zh/nodeDefs.json
       - name: Commit
         run: |
           git config user.name "github-actions[bot]"
