@@ -1,0 +1,268 @@
+name: TerryXu bus-style switch wire redraw
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-switch-wire-bus-style-20260906.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch switch wire redraw using bus visual strategy
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('web/switch_ui.js')
+          t = p.read_text(encoding='utf-8')
+
+          marker = 'function installSwitchHighlightStyles() {'
+          if marker not in t:
+              raise RuntimeError('highlight style marker not found')
+
+          if 'function patchSwitchWireCanvas()' not in t:
+              helper = r'''
+function switchGraphLink(graph, linkId) {
+  if (!graph || linkId == null) return null;
+  for (const bag of [graph?.links, graph?._links]) {
+    if (!bag) continue;
+    if (typeof bag.get === "function") {
+      const found = bag.get(linkId) ?? bag.get(String(linkId));
+      if (found) return found;
+    }
+    const found = bag[linkId] ?? bag[String(linkId)];
+    if (found) return found;
+  }
+  return null;
+}
+
+function switchGraphNode(graph, id) {
+  return graph?.getNodeById?.(id) || null;
+}
+
+function switchActiveSlot(node) {
+  if (isLine(node)) return routes(node)[activeEntryIndex(node)] || null;
+  if (isBool(node)) return [input(node, "input_false"), input(node, "input_true")][activeEntryIndex(node)] || null;
+  return null;
+}
+
+function switchLinkNodes(graph, link) {
+  const originId = link?.origin_id ?? link?.originId;
+  const targetId = link?.target_id ?? link?.targetId;
+  return {
+    origin: switchGraphNode(graph, originId),
+    target: switchGraphNode(graph, targetId),
+    originSlot: Number(link?.origin_slot ?? link?.originSlot ?? 0) || 0,
+    targetSlot: Number(link?.target_slot ?? link?.targetSlot ?? 0) || 0,
+  };
+}
+
+function switchOutputPoint(node, slot) {
+  const modern = node?.getOutputPos?.(slot);
+  if (Array.isArray(modern) && modern.length >= 2 && modern.every(Number.isFinite)) return modern;
+  const out = [0, 0];
+  try {
+    const p = node?.getConnectionPos?.(false, slot, out);
+    if (Array.isArray(p) && p.length >= 2 && p.every(Number.isFinite)) return p;
+  } catch {}
+  return [Number(node?.pos?.[0] || 0) + Number(node?.size?.[0] || 0), Number(node?.pos?.[1] || 0) + 40];
+}
+
+function switchInputPoint(node, slot) {
+  const modern = node?.getInputPos?.(slot);
+  if (Array.isArray(modern) && modern.length >= 2 && modern.every(Number.isFinite)) return modern;
+  const out = [0, 0];
+  try {
+    const p = node?.getConnectionPos?.(true, slot, out);
+    if (Array.isArray(p) && p.length >= 2 && p.every(Number.isFinite)) return p;
+  } catch {}
+  return [Number(node?.pos?.[0] || 0), Number(node?.pos?.[1] || 0) + 40 + Number(slot || 0) * 20];
+}
+
+function selectedSwitchLinks(graph) {
+  const links = [];
+  const seen = new Set();
+  for (const node of graph?._nodes || graph?.nodes || []) {
+    if (!isLine(node) && !isBool(node)) continue;
+    const slot = switchActiveSlot(node);
+    if (!slot || slot.link == null) continue;
+    const link = switchGraphLink(graph, slot.link);
+    if (!link) continue;
+    const id = link?.id ?? link?.link_id ?? link?.linkId ?? slot.link;
+    const key = String(id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    links.push(link);
+  }
+  return links;
+}
+
+// Same strategy as wire_bus_visual.js: temporarily remove only the links that
+// TerryXu is going to redraw, let ComfyUI render everything else normally,
+// then restore the graph immediately before drawing our replacement cable.
+function hideSelectedSwitchLinksForNativeDraw(graph, links) {
+  if (!graph || !links?.length) return () => {};
+  const bags = [];
+  const seenBags = new Set();
+  for (const bag of [graph?.links, graph?._links]) {
+    if (!bag || seenBags.has(bag)) continue;
+    seenBags.add(bag);
+    bags.push(bag);
+  }
+
+  const removed = [];
+  for (const bag of bags) {
+    const isMap = typeof bag.delete === "function" && typeof bag.set === "function";
+    for (const link of links) {
+      const id = link?.id ?? link?.link_id ?? link?.linkId;
+      if (id == null) continue;
+      for (const key of [id, String(id)]) {
+        const exists = isMap ? bag.has?.(key) : Object.prototype.hasOwnProperty.call(bag, key);
+        if (!exists) continue;
+        const value = isMap ? bag.get(key) : bag[key];
+        removed.push({ bag, isMap, key, value });
+        if (isMap) bag.delete(key);
+        else delete bag[key];
+        break;
+      }
+    }
+  }
+
+  return () => {
+    for (const item of removed) {
+      if (item.isMap) item.bag.set(item.key, item.value);
+      else item.bag[item.key] = item.value;
+    }
+  };
+}
+
+function drawSelectedSwitchLink(ctx, start, end, baseWidth) {
+  const sx = start[0], sy = start[1], ex = end[0], ey = end[1];
+  if (![sx, sy, ex, ey].every(Number.isFinite)) return;
+  const dx = Math.abs(ex - sx);
+  const tangent = Math.max(40, Math.min(180, dx * 0.5));
+  const width = Math.max(2.5, Number(baseWidth) || 3);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.bezierCurveTo(sx + tangent, sy, ex - tangent, ey, ex, ey);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(216,189,103,.16)";
+  ctx.lineWidth = width + 4;
+  ctx.stroke();
+  ctx.strokeStyle = "#d8bd67";
+  ctx.globalAlpha = .96;
+  ctx.lineWidth = width + .7;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSelectedSwitchLinks(canvas, ctx, graph, links) {
+  if (!ctx || !graph || !links?.length) return;
+  const width = Math.max(3, Number(canvas?.connections_width) || 3);
+  for (const link of links) {
+    const { origin, target, originSlot, targetSlot } = switchLinkNodes(graph, link);
+    if (!origin || !target) continue;
+    drawSelectedSwitchLink(
+      ctx,
+      switchOutputPoint(origin, originSlot),
+      switchInputPoint(target, targetSlot),
+      width
+    );
+  }
+}
+
+function patchSwitchWireCanvas(canvas) {
+  if (!canvas || canvas.__terrySwitchWirePatched || typeof canvas.drawConnections !== "function") return;
+  canvas.__terrySwitchWirePatched = true;
+  const original = canvas.drawConnections;
+  const originalSetGraph = canvas.setGraph;
+
+  if (typeof originalSetGraph === "function") {
+    canvas.setGraph = function () {
+      const result = originalSetGraph.apply(this, arguments);
+      this.__terrySwitchWireActiveGraph = this.graph || app.graph;
+      return result;
+    };
+  }
+
+  canvas.drawConnections = function (ctx) {
+    const graph = this.graph || app.graph;
+    const selected = selectedSwitchLinks(graph);
+    const restore = hideSelectedSwitchLinksForNativeDraw(graph, selected);
+    let result;
+    try {
+      result = original.apply(this, arguments);
+    } finally {
+      restore();
+    }
+    try {
+      drawSelectedSwitchLinks(this, ctx, graph, selected);
+    } catch (error) {
+      console.warn("[TerryXu Switch] Failed to draw selected route cable", error);
+    }
+    return result;
+  };
+}
+
+'''
+              t = t.replace(marker, helper + marker, 1)
+
+          # Install the canvas wrapper alongside the existing UI setup.
+          if 'patchSwitchWireCanvas(app.canvas);' not in t:
+              t, n = re.subn(
+                  r'(\n\s*setup\(\) \{\n)(\s*)installSwitchHighlightStyles\(\);',
+                  lambda m: m.group(1) + m.group(2) + 'patchSwitchWireCanvas(app.canvas);\n' + m.group(2) + 'installSwitchHighlightStyles();',
+                  t,
+                  count=1,
+              )
+              if n != 1:
+                  raise RuntimeError('setup hook not found')
+
+          # Re-run after graph configuration in case ComfyUI recreated the canvas.
+          if 'afterConfigureGraph() {\n    patchSwitchWireCanvas(app.canvas);' not in t:
+              needle = '  afterConfigureGraph() {\n'
+              if needle not in t:
+                  raise RuntimeError('afterConfigureGraph hook not found')
+              t = t.replace(needle, needle + '    patchSwitchWireCanvas(app.canvas);\n', 1)
+
+          p.write_text(t, encoding='utf-8')
+
+          wf = Path('.github/workflows/terryxu-switch-wire-bus-style-20260906.yml')
+          if wf.exists(): wf.unlink()
+          for folder in (Path('.github/workflows'), Path('.github')):
+              try: folder.rmdir()
+              except OSError: pass
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          node --check web/switch_ui.js
+          grep -q 'hideSelectedSwitchLinksForNativeDraw' web/switch_ui.js
+          grep -q 'patchSwitchWireCanvas(app.canvas)' web/switch_ui.js
+          grep -q 'Failed to draw selected route cable' web/switch_ui.js
+          if grep -q '__terrySwitchOriginalColor' web/switch_ui.js; then exit 1; fi
+          if grep -q 'link.color = "rgba(0,0,0,0)"' web/switch_ui.js; then exit 1; fi
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Use bus visual strategy for selected switch wires"
+          git push origin main
