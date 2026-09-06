@@ -1,0 +1,193 @@
+name: TerryXu node icons and group membership
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-node-icons-group-membership-20260906.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply node titles and group membership fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # Python-side display names used by node registration/search.
+          p = Path('nodes/line_switch.py')
+          s = p.read_text(encoding='utf-8').replace('display_name="多线切换器"', 'display_name="*️⃣ 多线切换器"')
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('nodes/bool_switch.py')
+          s = p.read_text(encoding='utf-8').replace('display_name="二路切换器"', 'display_name="🔀 二路切换器"')
+          p.write_text(s, encoding='utf-8')
+
+          # Front-end titles, including dynamic remote-controller title.
+          p = Path('web/line_switch.js')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('lineTitle: "多线切换器"', 'lineTitle: "*️⃣ 多线切换器"')
+          s = s.replace('boolTitle: "二路切换器"', 'boolTitle: "🔀 二路切换器"')
+          s = s.replace('remoteTitle: "远程控制器"', 'remoteTitle: "🎛️ 远程控制器"')
+          s = s.replace('lineTitle: "Multi-Line Switch"', 'lineTitle: "*️⃣ Multi-Line Switch"')
+          s = s.replace('boolTitle: "Two-Way Switch"', 'boolTitle: "🔀 Two-Way Switch"')
+          s = s.replace('remoteTitle: "Remote Control"', 'remoteTitle: "🎛️ Remote Control"')
+          old = '  node.title = text().remoteTitle;\n  const channelWidget = ensureRemoteChannelWidget(node);'
+          new = '  const configuredTargetName = remoteChannel(node);\n  node.title = configuredTargetName ? `🎛️ ${configuredTargetName}` : text().remoteTitle;\n  const channelWidget = ensureRemoteChannelWidget(node);'
+          if old not in s:
+              raise SystemExit('remote title block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          # Bus titles.
+          p = Path('web/wire_bus.js')
+          s = p.read_text(encoding='utf-8')
+          for old, new in [
+              ('packTitle: "总线-入"', 'packTitle: "🛝 总线-入"'),
+              ('unpackTitle: "总线-出"', 'unpackTitle: "🛝 总线-出"'),
+              ('wirelessPackTitle: "总线-入"', 'wirelessPackTitle: "🛝 总线-入"'),
+              ('wirelessUnpackTitle: "总线-出"', 'wirelessUnpackTitle: "🛝 总线-出"'),
+              ('packTitle: " Bus-In"', 'packTitle: "🛝 Bus-In"'),
+              ('unpackTitle: " Bus-Out"', 'unpackTitle: "🛝 Bus-Out"'),
+              ('wirelessPackTitle: "Bus-In"', 'wirelessPackTitle: "🛝 Bus-In"'),
+              ('wirelessUnpackTitle: "Bus-Out"', 'wirelessUnpackTitle: "🛝 Bus-Out"'),
+          ]:
+              s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+
+          # Native group membership follows a node's visual top edge for compact TerryXu nodes.
+          p = Path('web/group_membership_fix.js')
+          p.write_text(r'''import { app } from "../../scripts/app.js";
+
+const TOP_EDGE_GROUP_TYPES = new Set([
+  "TerryXuGroupManager",
+  "TerryXuWireBusPack",
+  "TerryXuWireBusUnpack",
+  "TerryXuWirelessBusPack",
+  "TerryXuWirelessBusUnpack",
+]);
+
+function nodeType(node) {
+  return String(node?.comfyClass || node?.type || node?.constructor?.comfyClass || node?.constructor?.type || "");
+}
+
+function rectOf(item) {
+  const bounds = item?._bounding || item?.boundingRect;
+  if (bounds?.length >= 4) {
+    const rect = [Number(bounds[0]), Number(bounds[1]), Number(bounds[2]), Number(bounds[3])];
+    if (rect.every(Number.isFinite)) return rect;
+  }
+  const pos = item?._pos || item?.pos;
+  const size = item?._size || item?.size;
+  if (pos?.length >= 2 && size?.length >= 2) {
+    const rect = [Number(pos[0]), Number(pos[1]), Number(size[0]), Number(size[1])];
+    if (rect.every(Number.isFinite)) return rect;
+  }
+  return null;
+}
+
+function visualTopInsideGroup(node, groupRect) {
+  const nodeRect = rectOf(node);
+  if (!nodeRect || !groupRect) return false;
+  const [gx, gy, gw, gh] = groupRect;
+  const [nx, ny, nw] = nodeRect;
+  const horizontalOverlap = nx + nw > gx && nx < gx + gw;
+  // A compact/collapsed node should belong to the group when its visible top
+  // edge is inside the group, even if its stored center/expanded bounds are not.
+  return horizontalOverlap && ny >= gy - 1 && ny <= gy + gh + 1;
+}
+
+function addGroupChild(group, node) {
+  let children = group?._children;
+  if (!children) {
+    group._children = new Set([node]);
+    return;
+  }
+  if (typeof children.add === "function") {
+    children.add(node);
+    return;
+  }
+  if (typeof children.set === "function") {
+    children.set(node, node);
+    return;
+  }
+  if (Array.isArray(children)) {
+    if (!children.includes(node)) children.push(node);
+    return;
+  }
+  const key = String(node?.id ?? node?._id ?? Math.random());
+  children[key] = node;
+}
+
+function patchGroupMembership() {
+  const Group = globalThis.LGraphGroup || globalThis.LiteGraph?.LGraphGroup;
+  const proto = Group?.prototype;
+  if (!proto || proto.__terryTopEdgeMembershipPatched) return false;
+  const original = proto.recomputeInsideNodes;
+  if (typeof original !== "function") return false;
+
+  proto.recomputeInsideNodes = function () {
+    const result = original.apply(this, arguments);
+    try {
+      const graph = this.graph || app.canvas?.graph || app.graph;
+      const groupRect = rectOf(this);
+      if (groupRect) {
+        for (const node of graph?._nodes || graph?.nodes || []) {
+          if (!TOP_EDGE_GROUP_TYPES.has(nodeType(node))) continue;
+          if (visualTopInsideGroup(node, groupRect)) addGroupChild(this, node);
+        }
+      }
+    } catch (error) {
+      console.warn("[TerryXu] top-edge group membership refresh failed", error);
+    }
+    return result;
+  };
+  proto.__terryTopEdgeMembershipPatched = true;
+  return true;
+}
+
+function ensurePatched() {
+  patchGroupMembership();
+}
+
+app.registerExtension({
+  name: "TerryXu.TopEdgeGroupMembership",
+  setup() { ensurePatched(); },
+  nodeCreated() { ensurePatched(); },
+  loadedGraphNode() { ensurePatched(); },
+  afterConfigureGraph() { ensurePatched(); },
+});
+''', encoding='utf-8')
+
+          Path('.github/workflows/terryxu-node-icons-group-membership-20260906.yml').unlink()
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          python3 -m py_compile nodes/line_switch.py nodes/bool_switch.py
+          node --check web/line_switch.js
+          node --check web/wire_bus.js
+          node --check web/group_membership_fix.js
+          grep -q 'display_name="*️⃣ 多线切换器"' nodes/line_switch.py
+          grep -q 'display_name="🔀 二路切换器"' nodes/bool_switch.py
+          grep -q '🎛️ ${configuredTargetName}' web/line_switch.js
+          grep -q '🛝 总线-入' web/wire_bus.js
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add node title icons and improve group membership"
+          git push origin main
