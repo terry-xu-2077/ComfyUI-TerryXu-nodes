@@ -1,0 +1,116 @@
+name: One-shot TerryXu repository migration
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out destination repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch source repository
+        run: |
+          git clone --depth 1 --branch main https://github.com/terry-xu-2077/ComfyUI-TerryTools.git /tmp/terrytools-source
+
+      - name: Replace destination tree with source tree
+        run: |
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          rsync -a --exclude='.git' /tmp/terrytools-source/ ./
+
+      - name: Rename public Terry registrations to TerryXu
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          extensions = {'.py', '.js', '.json', '.md', '.toml', '.txt', '.yml', '.yaml'}
+          replacements = [
+              ('ComfyUI-TerryTools', 'ComfyUI-TerryXu-nodes'),
+              ('comfyui-terry-tools', 'comfyui-terryxu-nodes'),
+              ('TerryBoolSwitch', 'TerryXuBoolSwitch'),
+              ('TerryDateFormatter', 'TerryXuDateFormatter'),
+              ('TerryFileSave', 'TerryXuFileSave'),
+              ('TerryH3PromptEditor', 'TerryXuH3PromptEditor'),
+              ('TerryH3ShotTimeline', 'TerryXuH3ShotTimeline'),
+              ('TerryLineSwitch', 'TerryXuLineSwitch'),
+              ('TerryVideoCompare', 'TerryXuVideoCompare'),
+              ('TerryGroupManager', 'TerryXuGroupManager'),
+              ('TerryRemoteControl', 'TerryXuRemoteControl'),
+              ('TerryWireBusPack', 'TerryXuWireBusPack'),
+              ('TerryWireBusUnpack', 'TerryXuWireBusUnpack'),
+              ('TerryWirelessBusPack', 'TerryXuWirelessBusPack'),
+              ('TerryWirelessBusUnpack', 'TerryXuWirelessBusUnpack'),
+              ('TerryToolsExtension', 'TerryXuExtension'),
+              ('TerryTools', 'TerryXu'),
+          ]
+
+          for path in Path('.').rglob('*'):
+              if not path.is_file() or '.git' in path.parts or path.suffix.lower() not in extensions:
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              original = text
+              for old, new in replacements:
+                  text = text.replace(old, new)
+              text = re.sub(r'\bTerry\b', 'TerryXu', text)
+              if path.name == 'pyproject.toml':
+                  text = text.replace('PublisherId = "terry"', 'PublisherId = "terryxu"')
+                  text = text.replace("PublisherId = 'terry'", "PublisherId = 'terryxu'")
+              if text != original:
+                  path.write_text(text, encoding='utf-8')
+
+      - name: Validate migration
+        shell: bash
+        run: |
+          python -m compileall -q .
+          for file in web/*.js; do node --check "$file"; done
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          extensions = {'.py', '.js', '.json', '.md', '.toml', '.txt', '.yml', '.yaml'}
+          bad = []
+          checks = [
+              re.compile(r'\bTerry(?!Xu)(?=[A-Z])'),
+              re.compile(r'TerryTools'),
+              re.compile(r'ComfyUI-TerryTools'),
+          ]
+          for path in Path('.').rglob('*'):
+              if not path.is_file() or '.git' in path.parts or path.suffix.lower() not in extensions:
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              for pattern in checks:
+                  match = pattern.search(text)
+                  if match:
+                      bad.append(f'{path}: {match.group(0)}')
+          if bad:
+              raise SystemExit('Old public Terry registration/branding remains:\n' + '\n'.join(bad[:100]))
+
+          pyproject = Path('pyproject.toml').read_text(encoding='utf-8')
+          assert 'name = "comfyui-terryxu-nodes"' in pyproject
+          assert 'PublisherId = "terryxu"' in pyproject
+          assert 'DisplayName = "TerryXu"' in pyproject
+          print('TerryXu migration validation passed.')
+          PY
+
+      - name: Commit complete replacement
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Migrate TerryTools to TerryXu"
+          git push origin HEAD:main
