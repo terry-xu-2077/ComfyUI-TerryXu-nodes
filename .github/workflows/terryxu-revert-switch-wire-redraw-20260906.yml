@@ -1,0 +1,41 @@
+name: TerryXu rollback switch wire redraw
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-revert-switch-wire-redraw-20260906.yml
+
+permissions:
+  contents: write
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore stable switch UI
+        shell: bash
+        run: |
+          git checkout 906a31627216c072d281a6f818135c64740c2d05 -- web/switch_ui.js
+          rm -f .github/workflows/terryxu-revert-switch-wire-redraw-20260906.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+
+      - name: Validate
+        shell: bash
+        run: |
+          node --check web/switch_ui.js
+          test ! -e .github/workflows/terryxu-revert-switch-wire-redraw-20260906.yml
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Rollback unsafe switch wire redraw"
+          git push origin main
