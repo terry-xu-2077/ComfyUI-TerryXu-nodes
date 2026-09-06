@@ -381,7 +381,12 @@ function rebuildRemoteValueWidget(node, description, force = false) {
     const adapter = target && controlAdapters.get(nodeType(target));
     if (!target || !adapter) return;
     if (adapter.set(target, value) !== false) {
-      properties(node)[REMOTE_VALUE_PROPERTY] = value;
+      // The controlled node is the single source of truth. Any successful
+      // remote write is followed by a read-back and a refresh of every remote.
+      const actual = adapter.describe?.(target)?.value ?? value;
+      properties(node)[REMOTE_VALUE_PROPERTY] = actual;
+      refreshAllRemotes();
+      target.graph?.setDirtyCanvas?.(true, true);
       node.graph?.setDirtyCanvas?.(true, true);
     }
   };
