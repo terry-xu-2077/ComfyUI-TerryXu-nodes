@@ -27,8 +27,6 @@ jobs:
           path = Path('web/h3_prompt_editor.js')
           text = path.read_text(encoding='utf-8')
 
-          # Keep virtual-link ownership on the node the user actually connected (e.g. Bus-Out).
-          # Resolve through Bus-Out only when metadata/execution needs the real upstream media.
           normalize_pattern = re.compile(
               r'function normalizeLinks\(node\) \{.*?\n\}\n\nfunction addVirtualLink',
               re.S,
@@ -92,11 +90,11 @@ jobs:
           if n != 1:
               raise RuntimeError(f'addVirtualLink replacement count={n}')
 
-          old_prompt = '''      normalizeLinks(node).forEach((link, i) => {
-                if (!output[String(link.source_id)]) return;
-                dst.inputs[`asset${i + 1}`] = [String(link.source_id), Number(link.source_slot) || 0];
-              });'''
-          new_prompt = '''      let assetIndex = 0;
+          prompt_pattern = re.compile(
+              r'      normalizeLinks\(node\)\.forEach\(\(link, i\) => \{.*?      \}\);',
+              re.S,
+          )
+          prompt_replacement = '''      let assetIndex = 0;
               for (const link of normalizeLinks(node)) {
                 const displaySource = app.graph?.getNodeById?.(Number(link.source_id));
                 const resolved = resolveVirtualMediaSource(displaySource, link.source_slot, link.source_type);
@@ -106,9 +104,9 @@ jobs:
                 assetIndex += 1;
                 dst.inputs[`asset${assetIndex}`] = [String(executionId), Number(resolved.slot) || 0];
               }'''
-          if old_prompt not in text:
-              raise RuntimeError('graphToPrompt anchor not found')
-          text = text.replace(old_prompt, new_prompt, 1)
+          text, n = prompt_pattern.subn(prompt_replacement, text, count=1)
+          if n != 1:
+              raise RuntimeError(f'graphToPrompt replacement count={n}')
 
           media_pattern = re.compile(
               r'function mediaOptions\(node\) \{.*?\n\}\n\nfunction watchSourceNode',
@@ -161,6 +159,7 @@ jobs:
           node --check web/h3_prompt_editor.js
           grep -q 'const displaySource = app.graph' web/h3_prompt_editor.js
           grep -q 'const executionSource = resolved.node' web/h3_prompt_editor.js
+          grep -q 'source_id: Number(source.id)' web/h3_prompt_editor.js
 
       - name: Commit
         shell: bash
