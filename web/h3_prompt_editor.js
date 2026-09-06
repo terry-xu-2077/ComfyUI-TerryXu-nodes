@@ -75,28 +75,56 @@ function sourceType(node, slot = 0, fallback = "") {
   return "picture";
 }
 
+function resolveVirtualMediaSource(source, sourceSlot = 0, fallbackType = "") {
+  let node = source;
+  let slot = Number(sourceSlot) || 0;
+  try {
+    const resolved = source?.resolveVirtualOutput?.(slot);
+    if (resolved?.node) {
+      node = resolved.node;
+      slot = Number(resolved.slot) || 0;
+    }
+  } catch {}
+  return { node, slot, type: String(node?.outputs?.[slot]?.type || fallbackType || "*") };
+}
+
 function normalizeLinks(node) {
   const graph = node?.graph || app.graph;
   const seen = new Set();
   const out = [];
   for (const link of ensureLinks(node)) {
     const id = Number(link?.source_id);
-    const slot = Number(link?.source_slot) || 0;
+    const rawSlot = Number(link?.source_slot) || 0;
     if (!Number.isFinite(id) || id === Number(node.id)) continue;
-    const src = graph?.getNodeById?.(id);
-    if (!src) continue;
-    const kind = sourceType(src, slot, link?.source_type);
-    const key = `${id}:${slot}`;
+    const rawSource = graph?.getNodeById?.(id);
+    if (!rawSource) continue;
+    const resolved = resolveVirtualMediaSource(rawSource, rawSlot, link?.source_type);
+    const src = resolved.node;
+    const slot = resolved.slot;
+    const resolvedId = Number(src?.id);
+    if (!src || !Number.isFinite(resolvedId) || resolvedId === Number(node.id)) continue;
+    const kind = sourceType(src, slot, resolved.type || link?.source_type);
+    const key = `${resolvedId}:${slot}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ source_id: id, source_slot: slot, source_type: String(src.outputs?.[slot]?.type || link?.source_type || "*"), kind });
+    out.push({
+      source_id: resolvedId,
+      source_slot: slot,
+      source_type: String(resolved.type || src.outputs?.[slot]?.type || link?.source_type || "*"),
+      kind,
+    });
   }
   node.properties[LINKS_PROP] = out.slice(0, MAX_MEDIA);
   return node.properties[LINKS_PROP];
 }
 
 function addVirtualLink(node, source, sourceSlot = 0, sourceTypeValue = "") {
-  if (!node || !source || Number(source.id) === Number(node.id)) return false;
+  if (!node || !source) return false;
+  const resolved = resolveVirtualMediaSource(source, sourceSlot, sourceTypeValue);
+  source = resolved.node;
+  sourceSlot = resolved.slot;
+  sourceTypeValue = resolved.type;
+  if (!source || Number(source.id) === Number(node.id)) return false;
   const links = normalizeLinks(node);
   if (links.length >= MAX_MEDIA) return false;
   if (links.some((x) => Number(x.source_id) === Number(source.id) && Number(x.source_slot) === Number(sourceSlot))) return false;

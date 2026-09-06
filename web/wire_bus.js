@@ -181,6 +181,10 @@ function wirelessChannelWidget(node) {
   return (node?.widgets || []).find((widget) => widget?.terryWirelessChannel === true) || null;
 }
 
+function wirelessUnpackUsesWiredBus(node) {
+  return isWirelessUnpack(node) && node?.inputs?.[0]?.link != null;
+}
+
 function wirelessChannelName(node) {
   const widgetValue = wirelessChannelWidget(node)?.value;
   return String(widgetValue ?? node?.properties?.[WIRELESS_CHANNEL_PROPERTY] ?? "").trim();
@@ -299,6 +303,14 @@ function installWirelessControlStyle() {
   border-color:rgba(255,255,255,.45);
   background:rgba(0,0,0,.28);
 }
+.terry-wireless-channel-control.is-disabled{
+  opacity:.42;
+  filter:saturate(.3);
+  border-color:rgba(255,255,255,.1);
+  background:rgba(0,0,0,.12);
+  pointer-events:none;
+}
+.terry-wireless-channel-control.is-disabled::after{opacity:.35}
 .terry-wireless-channel-control input,
 .terry-wireless-channel-control select{
   display:block;
@@ -376,6 +388,7 @@ function initializeWirelessControl(node) {
     }
   });
   control.addEventListener("change", () => {
+    if (!pack && wirelessUnpackUsesWiredBus(node)) return;
     setWirelessChannel(node, control.value);
     node.graph?.setDirtyCanvas?.(true, true);
     node.graph?.change?.();
@@ -406,6 +419,10 @@ function initializeWirelessControl(node) {
         if (document.activeElement !== control) control.value = selected;
         return;
       }
+
+      const wired = wirelessUnpackUsesWiredBus(node);
+      control.disabled = wired;
+      root.classList.toggle("is-disabled", wired);
 
       const names = wirelessChannelNames(node.graph || app.graph);
       const signature = `${localeCode()}\u0000${names.join("\u0000")}`;
@@ -884,6 +901,7 @@ function syncWirelessBridgePackHeight(pack, publishedEntries = null) {
 
 function syncUnpack(unpack, force = false) {
   localizeFixedPorts(unpack);
+  if (isWirelessUnpack(unpack)) unpack.__terryWirelessControl?.refresh?.();
   const pack = findPackFromUnpack(unpack);
   const entries = pack ? effectivePackLaneEntries(pack) : [];
   syncWirelessBridgePackHeight(pack, entries);

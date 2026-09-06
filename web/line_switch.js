@@ -402,6 +402,28 @@ function rebuildRemoteValueWidget(node, description, force = false) {
   return widget;
 }
 
+function syncRemoteColor(node, target) {
+  if (!isRemote(node)) return false;
+  if (!node.__terryRemoteDefaultColors) {
+    node.__terryRemoteDefaultColors = { color: node.color, bgcolor: node.bgcolor };
+  }
+  const defaults = node.__terryRemoteDefaultColors;
+  let changed = false;
+  for (const key of ["color", "bgcolor"]) {
+    const desired = target?.[key] ?? defaults[key];
+    if (desired == null || desired === "") {
+      if (node[key] != null && node[key] !== "") {
+        delete node[key];
+        changed = true;
+      }
+    } else if (node[key] !== desired) {
+      node[key] = desired;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function refreshRemote(node, force = false) {
   if (!isRemote(node)) return;
   node.isVirtualNode = true;
@@ -421,6 +443,7 @@ function refreshRemote(node, force = false) {
     }
   }
   const target = targetForChannel(remoteChannel(node));
+  syncRemoteColor(node, target);
   const adapter = target && controlAdapters.get(nodeType(target));
   const description = adapter?.describe?.(target) || null;
   const valueWidget = rebuildRemoteValueWidget(node, description, force);
@@ -519,11 +542,21 @@ function startAnimation() {
   if (globalThis.__terryControlAnimation) return;
   globalThis.__terryControlAnimation = true;
   let last = 0;
+  let lastColorSync = 0;
   const tick = (time) => {
     if (time - last > 45) {
       last = time;
       const active = graphNodes().some((node) => isControllable(node) && activeInput(node)?.link != null);
       if (active) app.graph?.setDirtyCanvas?.(true, false);
+    }
+    if (time - lastColorSync > 180) {
+      lastColorSync = time;
+      let changed = false;
+      for (const remote of graphNodes()) {
+        if (!isRemote(remote)) continue;
+        changed = syncRemoteColor(remote, targetForChannel(remoteChannel(remote))) || changed;
+      }
+      if (changed) app.graph?.setDirtyCanvas?.(true, true);
     }
     requestAnimationFrame(tick);
   };
