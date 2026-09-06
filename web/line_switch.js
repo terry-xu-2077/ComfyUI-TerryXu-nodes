@@ -238,6 +238,7 @@ function refreshLine(node) {
   if (output) output.label = labels.output;
   const widget = indexWidget(node);
   if (widget) {
+    bindTargetWidgetSync(node, widget, "line");
     const values = routeValues(node);
     widget.type = "combo";
     widget.label = labels.index;
@@ -249,6 +250,33 @@ function refreshLine(node) {
   if (channel) channel.label = labels.channel;
   globalThis.__terrySyncSwitchUI?.(node);
   node.graph?.setDirtyCanvas?.(true, true);
+}
+
+function bindTargetWidgetSync(node, widget, kind) {
+  if (!node || !widget || widget.__terryRemoteTargetSyncWrapped) return;
+  const original = widget.callback;
+  widget.callback = function (value) {
+    const result = original?.apply(this, arguments);
+    if (kind === "line") {
+      const next = clampIndex(value, routeValues(node).length);
+      properties(node)[INDEX_PROPERTY] = next;
+      node.__terryRuntimeIndex = next;
+    } else if (kind === "bool") {
+      const next = Boolean(value);
+      properties(node)[BOOL_PROPERTY] = next;
+      node.__terryRuntimeBool = next;
+    }
+    // Nodes 2.0 can update a widget without going through node.onWidgetChanged.
+    // Treat the target widget callback as the direct-change event and refresh
+    // every remote from the target, which remains the single source of truth.
+    queueMicrotask(() => {
+      globalThis.__terrySyncSwitchUI?.(node);
+      refreshAllRemotes();
+      node.graph?.setDirtyCanvas?.(true, true);
+    });
+    return result;
+  };
+  widget.__terryRemoteTargetSyncWrapped = true;
 }
 
 function refreshBool(node) {
@@ -268,7 +296,10 @@ function refreshBool(node) {
   const output = node.outputs?.[0];
   if (output) output.label = labels.output;
   const widget = boolWidget(node);
-  if (widget) widget.label = labels.bool;
+  if (widget) {
+    bindTargetWidgetSync(node, widget, "bool");
+    widget.label = labels.bool;
+  }
   const channel = widgetByName(node, CHANNEL_WIDGET);
   if (channel) channel.label = labels.channel;
   globalThis.__terrySyncSwitchUI?.(node);
