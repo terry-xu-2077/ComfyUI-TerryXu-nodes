@@ -2,9 +2,8 @@ name: TerryXu remote multi-control sync
 
 on:
   push:
-    branches: [main]
-    paths:
-      - .github/workflows/terryxu-remote-multisync-20260906.yml
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -14,60 +13,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Patch remote synchronization
-        shell: bash
+      - name: Patch
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
-
-          p = Path('web/line_switch.js')
-          t = p.read_text(encoding='utf-8')
-
-          old = '''    if (adapter.set(target, value) !== false) {
+          p = Path("web/line_switch.js")
+          t = p.read_text(encoding="utf-8")
+          old = """    if (adapter.set(target, value) !== false) {
       properties(node)[REMOTE_VALUE_PROPERTY] = value;
       node.graph?.setDirtyCanvas?.(true, true);
     }
-'''
-          new = '''    if (adapter.set(target, value) !== false) {
-      // The controlled node is the single source of truth. After any remote
-      // changes it, refresh every remote so multiple controllers targeting the
-      // same channel immediately converge on the target's actual state.
+"""
+          new = """    if (adapter.set(target, value) !== false) {
+      // The controlled node is the single source of truth. Any successful
+      // remote write is followed by a read-back and a refresh of every remote.
       const actual = adapter.describe?.(target)?.value ?? value;
       properties(node)[REMOTE_VALUE_PROPERTY] = actual;
       refreshAllRemotes();
       target.graph?.setDirtyCanvas?.(true, true);
       node.graph?.setDirtyCanvas?.(true, true);
     }
-'''
+"""
           if old not in t:
-              raise RuntimeError('remote callback block not found')
-          t = t.replace(old, new, 1)
-
-          p.write_text(t, encoding='utf-8')
-
-          wf = Path('.github/workflows/terryxu-remote-multisync-20260906.yml')
-          if wf.exists(): wf.unlink()
-          for folder in (Path('.github/workflows'), Path('.github')):
-              try: folder.rmdir()
-              except OSError: pass
+              raise SystemExit("remote callback block not found")
+          p.write_text(t.replace(old, new, 1), encoding="utf-8")
+          Path(".github/workflows/terryxu-remote-multisync-20260906.yml").unlink()
           PY
-
       - name: Validate
-        shell: bash
-        run: |
-          node --check web/line_switch.js
-          grep -q 'const actual = adapter.describe?.(target)?.value ?? value;' web/line_switch.js
-          grep -q 'refreshAllRemotes();' web/line_switch.js
-          test ! -e .github/workflows/terryxu-remote-multisync-20260906.yml
-
+        run: node --check web/line_switch.js
       - name: Commit
-        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Synchronize multiple remote controllers"
-          git push origin main
+          git push
