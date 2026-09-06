@@ -85,9 +85,9 @@ function selectedSwitchLinks(graph) {
   return links;
 }
 
-// Copied from the proven approach used by wire_bus_visual.js: remove only the
-// links we will redraw from graph.links/_links while ComfyUI performs its native
-// connection pass, then restore them immediately afterwards.
+// Same proven strategy as wire_bus_visual.js: temporarily remove only the
+// selected links during ComfyUI's native pass, then restore them immediately
+// and redraw just those links with a subtle selection treatment.
 function hideLinksForNativeDraw(graph, links) {
   if (!graph || !links?.length) return () => {};
 
@@ -152,27 +152,70 @@ function inputPoint(node, slot) {
   ];
 }
 
-function drawHighlightedLink(ctx, start, end, baseWidth) {
-  if (!ctx) return;
+function originalLinkColor(graph, link) {
+  const { origin, target, originSlot, targetSlot } = linkNodes(graph, link);
+  const type = String(
+    link?.type ||
+    origin?.outputs?.[originSlot]?.type ||
+    target?.inputs?.[targetSlot]?.type ||
+    "*"
+  );
+  const colors = globalThis.LGraphCanvas?.link_type_colors || {};
+  return (
+    link?.color ||
+    colors[type] ||
+    colors[type.toUpperCase?.() || type] ||
+    globalThis.LiteGraph?.LINK_COLOR ||
+    colors["*"] ||
+    "#9ca3af"
+  );
+}
+
+function makeLinkPath(ctx, start, end) {
   const sx = start?.[0], sy = start?.[1], ex = end?.[0], ey = end?.[1];
-  if (![sx, sy, ex, ey].every(Number.isFinite)) return;
-
+  if (![sx, sy, ex, ey].every(Number.isFinite)) return false;
   const tangent = Math.max(40, Math.min(180, Math.abs(ex - sx) * 0.5));
-  const width = Math.max(2.5, Number(baseWidth) || 3);
-
-  ctx.save();
   ctx.beginPath();
   ctx.moveTo(sx, sy);
   ctx.bezierCurveTo(sx + tangent, sy, ex - tangent, ey, ex, ey);
+  return true;
+}
+
+function drawHighlightedLink(ctx, start, end, color, baseWidth) {
+  if (!ctx) return;
+  const width = Math.max(2.5, Number(baseWidth) || 3);
+
+  ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.strokeStyle = "rgba(216,189,103,.15)";
-  ctx.lineWidth = width + 4;
-  ctx.stroke();
-  ctx.strokeStyle = "#d8bd67";
-  ctx.globalAlpha = 0.96;
-  ctx.lineWidth = width + 0.7;
-  ctx.stroke();
+
+  // Same-color outer glow: intentionally narrow and low-opacity.
+  if (makeLinkPath(ctx, start, end)) {
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.32;
+    ctx.lineWidth = width + 1.8;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 5;
+    ctx.stroke();
+  }
+
+  // Thin same-color outline around the original-width core.
+  ctx.shadowBlur = 0;
+  if (makeLinkPath(ctx, start, end)) {
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.72;
+    ctx.lineWidth = width + 1.15;
+    ctx.stroke();
+  }
+
+  // Preserve the link's native type color as the actual line color.
+  if (makeLinkPath(ctx, start, end)) {
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  }
+
   ctx.restore();
 }
 
@@ -201,6 +244,7 @@ function patchCanvas(canvas) {
           ctx,
           outputPoint(origin, originSlot),
           inputPoint(target, targetSlot),
+          originalLinkColor(graph, link),
           baseWidth
         );
       }
