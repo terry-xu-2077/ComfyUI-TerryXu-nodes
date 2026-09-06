@@ -33,6 +33,22 @@ function kindOf(src, slot, fallback = "") {
   if (type.includes("VIDEO")) return "video";
   return "picture";
 }
+function resolveAssetSource(src, slot = 0, fallbackType = "") {
+  let node = src;
+  let resolvedSlot = Number(slot) || 0;
+  try {
+    const resolved = src?.resolveVirtualOutput?.(resolvedSlot);
+    if (resolved?.node) {
+      node = resolved.node;
+      resolvedSlot = Number(resolved.slot) || 0;
+    }
+  } catch {}
+  return {
+    node,
+    slot: resolvedSlot,
+    type: String(node?.outputs?.[resolvedSlot]?.type || fallbackType || "*"),
+  };
+}
 function filename(src, kind) {
   const preferred = kind === "picture"
     ? ["image", "filename", "file"]
@@ -67,15 +83,28 @@ function assets(node, mode) {
   for (const link of links(node, mode)) {
     const id = Number(link?.source_id), slot = Number(link?.source_slot) || 0, key = `${id}:${slot}`;
     if (!Number.isFinite(id) || seen.has(key)) continue;
-    const src = graphNode(node, id);
-    if (!src) continue;
+    const displaySrc = graphNode(node, id);
+    if (!displaySrc) continue;
     seen.add(key);
-    const kind = link.kind || kindOf(src, slot, link.source_type);
+    const resolved = resolveAssetSource(displaySrc, slot, link.source_type);
+    const src = resolved.node || displaySrc;
+    const sourceSlot = Number(resolved.slot) || 0;
+    const kind = kindOf(src, sourceSlot, resolved.type || link.source_type);
     count[kind] = (count[kind] || 0) + 1;
     const index = count[kind];
     const english = kind === "picture" ? `Picture ${index}` : kind === "video" ? `Video ${index}` : `Audio ${index}`;
     const chinese = kind === "picture" ? `图片 ${index}` : kind === "video" ? `视频 ${index}` : `音频 ${index}`;
-    out.push({ key, kind, index, raw: `<${english}>`, label: english, displayLabel: chinese, src, name: filename(src, kind).split(/[\\/]/).pop() || src.title || english, preview: preview(src, kind) });
+    out.push({
+      key,
+      kind,
+      index,
+      raw: `<${english}>`,
+      label: english,
+      displayLabel: chinese,
+      src,
+      name: filename(src, kind).split(/[\\/]/).pop() || src.title || english,
+      preview: preview(src, kind),
+    });
   }
   return out;
 }
