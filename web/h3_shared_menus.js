@@ -338,7 +338,7 @@ function openAssetMenu(controller) {
     empty.textContent = allAssets.length ? "没有匹配的参考资产。" : "还没有连接图片、视频或音频参考。";
     menu.append(empty);
   }
-  placeMenu(menu, editor, 360, 520);
+  placeMenu(menu, editor, 255, 520);
   return true;
 }
 

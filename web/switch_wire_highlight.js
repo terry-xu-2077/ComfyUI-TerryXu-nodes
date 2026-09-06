@@ -215,18 +215,8 @@ function drawHighlightedLink(ctx, start, end, color, baseWidth) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // Broad soft glow stays in the original type color.
-  if (makeLinkPath(ctx, start, end)) {
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.38;
-    ctx.lineWidth = width + 5.8;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 14;
-    ctx.stroke();
-  }
 
   // Original type color becomes the outer outline.
-  ctx.shadowBlur = 0;
   if (makeLinkPath(ctx, start, end)) {
     ctx.strokeStyle = color;
     ctx.globalAlpha = 0.96;
@@ -234,11 +224,11 @@ function drawHighlightedLink(ctx, start, end, color, baseWidth) {
     ctx.stroke();
   }
 
-  // Slimmer inner core: same hue mixed toward white for clear contrast.
+  // Brighter inner core, slightly thicker; no glow.
   if (makeLinkPath(ctx, start, end)) {
     ctx.strokeStyle = bright;
     ctx.globalAlpha = 1;
-    ctx.lineWidth = Math.max(2.0, width - 0.45);
+    ctx.lineWidth = Math.max(2.5, width + 0.15);
     ctx.stroke();
   }
 

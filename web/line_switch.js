@@ -35,7 +35,7 @@ function isChinese() {
 function text() {
   return isChinese()
     ? {
-        lineTitle: "线路切换器",
+        lineTitle: "多线切换器",
         boolTitle: "二路切换器",
         remoteTitle: "远程控制器",
         index: "线路",
@@ -51,7 +51,7 @@ function text() {
         remoteDescription: "按名称自动匹配可控节点，并生成对应的远程控制界面。",
       }
     : {
-        lineTitle: "Line Switch",
+        lineTitle: "Multi-Line Switch",
         boolTitle: "Two-Way Switch",
         remoteTitle: "Remote Control",
         index: "Route",
