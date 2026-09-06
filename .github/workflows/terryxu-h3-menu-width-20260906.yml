@@ -1,0 +1,41 @@
+name: TerryXu H3 reference menu width
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-h3-menu-width-20260906.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Narrow reference menu
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('web/h3_shared_menus.js')
+          s = p.read_text(encoding='utf-8')
+          old = '.terry-h3-role-menu{width:360px;'
+          new = '.terry-h3-role-menu{width:295px;'
+          if old not in s:
+              raise SystemExit('role menu width marker not found')
+          s = s.replace(old, new, 1)
+          # Keep placement math aligned with the real rendered width.
+          s = s.replace('placeMenu(menu, editor, 255, 520);', 'placeMenu(menu, editor, 295, 520);', 1)
+          p.write_text(s, encoding='utf-8')
+          Path('.github/workflows/terryxu-h3-menu-width-20260906.yml').unlink()
+          PY
+      - name: Validate
+        run: |
+          node --check web/h3_shared_menus.js
+          grep -q '.terry-h3-role-menu{width:295px;' web/h3_shared_menus.js
+          grep -q 'placeMenu(menu, editor, 295, 520);' web/h3_shared_menus.js
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Narrow H3 reference menu"
+          git push
