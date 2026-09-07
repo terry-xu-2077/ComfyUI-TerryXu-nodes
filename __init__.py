@@ -2,6 +2,7 @@ from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
 
 from .nodes import (
+    BooleanSwitch,
     BoolSwitch,
     H3PromptEditor,
     LineSwitch,
@@ -24,6 +25,7 @@ class TerryXuExtension(ComfyExtension):
             H3PromptEditor,
             LineSwitch,
             BoolSwitch,
+            BooleanSwitch,
         ]
 
 
