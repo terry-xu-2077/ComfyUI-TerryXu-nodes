@@ -12,8 +12,7 @@ const CHANNEL_PROPERTY = "terry_wireless_bus_channel";
 const UNPACK_LANES_PROPERTY = "terry_wire_bus_lane_ids";
 const LANE_FIELD = "terry_lane_id";
 const BUS_OUTPUT_FIELD = "terry_bus_passthrough_output";
-const MODE_ROW_HEIGHT = 28;
-const WIRELESS_CHANNEL_BLOCK_HEIGHT = 40;
+const MODE_ROW_HEIGHT = 30;
 
 function localeCode() {
   try {
@@ -81,37 +80,60 @@ function ensureModeWidgetOrder(node) {
   widgets.splice(nextChannelIndex + 1, 0, mode);
 }
 
+function installSizeGuard(node) {
+  if (!isUnpack(node) || node.__terryBusOutputModeSizeGuard) return;
+  const original = node.setSize;
+  if (typeof original !== "function") return;
+
+  node.__terryBusOutputModeSizeGuard = true;
+  node.__terryBusOutputModeOriginalSetSize = original;
+  node.setSize = function(size) {
+    if (
+      this.__terryBusOutputModeRawSetSize
+      || this.flags?.collapsed
+      || !modeWidget(this)
+      || !Array.isArray(size)
+    ) {
+      return original.apply(this, arguments);
+    }
+
+    const next = [...size];
+    const requestedHeight = Math.max(0, Number(next[1]) || 0);
+    const previousBase = Math.max(0, Number(this.__terryBusOutputModeBaseHeight) || 0);
+    const isAlreadyAdjusted = previousBase > 0
+      && Math.abs(requestedHeight - (previousBase + MODE_ROW_HEIGHT)) <= 0.5;
+
+    if (!isAlreadyAdjusted) {
+      this.__terryBusOutputModeBaseHeight = requestedHeight;
+      next[1] = requestedHeight + MODE_ROW_HEIGHT;
+    }
+
+    const result = original.call(this, next);
+    if (!this.flags?.collapsed) {
+      this.__terryBusExpandedSize = [
+        Math.max(112, Number(next[0]) || Number(this.size?.[0]) || 112),
+        Math.max(0, Number(next[1]) || 0),
+      ];
+    }
+    return result;
+  };
+}
+
 function ensureModeLayout(node) {
   if (!isUnpack(node) || !modeWidget(node) || node.flags?.collapsed) return;
-
   ensureModeWidgetOrder(node);
+  installSizeGuard(node);
 
+  const width = Math.max(112, Number(node.size?.[0]) || 112);
   const currentHeight = Math.max(0, Number(node.size?.[1]) || 0);
-  const previousExtra = Math.max(0, Number(node.__terryBusOutputModeExtraApplied) || 0);
-  const preferredBase = Math.max(
-    0,
-    Number(node.__terryBusPreferredHeight) || 0,
-    Number(node.__terryBusMinHeight) || 0
-  );
-  const inferredBase = Math.max(0, currentHeight - previousExtra);
-  const baseHeight = preferredBase || inferredBase;
-  const desiredHeight = Math.max(currentHeight, baseHeight + MODE_ROW_HEIGHT);
+  const baseHeight = Math.max(0, Number(node.__terryBusOutputModeBaseHeight) || 0);
+  const desiredHeight = baseHeight > 0 ? baseHeight + MODE_ROW_HEIGHT : currentHeight + MODE_ROW_HEIGHT;
 
-  node.__terryBusOutputModeExtraApplied = MODE_ROW_HEIGHT;
-  if (Math.abs(desiredHeight - currentHeight) > 0.5) {
-    const width = Math.max(112, Number(node.size?.[0]) || 112);
-    node.setSize?.([width, desiredHeight]);
+  if (baseHeight <= 0 || currentHeight + 0.5 < desiredHeight) {
+    node.setSize?.([width, baseHeight > 0 ? baseHeight : currentHeight]);
   }
 
-  const finalHeight = Math.max(desiredHeight, Number(node.size?.[1]) || 0);
-  node.widgets_start_y = isWirelessUnpack(node)
-    ? Math.max(0, finalHeight - WIRELESS_CHANNEL_BLOCK_HEIGHT - MODE_ROW_HEIGHT)
-    : Math.max(0, finalHeight - MODE_ROW_HEIGHT);
-
-  node.__terryBusExpandedSize = [
-    Math.max(112, Number(node.size?.[0]) || 112),
-    finalHeight,
-  ];
+  node._widgetSlotsDirty = true;
   node.graph?.setDirtyCanvas?.(true, true);
 }
 
@@ -340,7 +362,6 @@ function ensureModeWidget(node) {
     existing.options.on = text().expand;
     existing.options.off = text().bus;
     if (existing.value !== expandedMode(node)) existing.value = expandedMode(node);
-    ensureModeLayout(node);
     return;
   }
   if (properties(node)[MODE_PROPERTY] == null) properties(node)[MODE_PROPERTY] = true;
@@ -355,7 +376,6 @@ function ensureModeWidget(node) {
     widget.label = text().expand;
     widget.serialize = false;
   }
-  ensureModeLayout(node);
 }
 
 function wrapBusRefresh(node) {
@@ -378,6 +398,7 @@ function wrapBusRefresh(node) {
 function installNode(node) {
   if (!isUnpack(node)) return;
   ensureModeWidget(node);
+  installSizeGuard(node);
   wrapBusRefresh(node);
   if (expandedMode(node)) restoreExpandedOutputs(node);
   else ensureBusOutput(node);
@@ -388,15 +409,6 @@ function patchUnpackClass(nodeTypeClass) {
   if (!nodeTypeClass?.prototype || nodeTypeClass.prototype.__terryBusOutputModePatched) return;
   const proto = nodeTypeClass.prototype;
   proto.__terryBusOutputModePatched = true;
-
-  const originalComputeSize = proto.computeSize;
-  proto.computeSize = function () {
-    const size = originalComputeSize?.apply(this, arguments) || [112, 96];
-    if (Array.isArray(size) && !this.flags?.collapsed) {
-      size[1] = Math.max(0, Number(size[1]) || 0) + MODE_ROW_HEIGHT;
-    }
-    return size;
-  };
 
   const originalCreated = proto.onNodeCreated;
   proto.onNodeCreated = function () {
