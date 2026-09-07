@@ -484,6 +484,13 @@ function setupSubgraphNode(node, attempt = 0) {
   const previewSlot = ensurePromotion(node, h3, PREVIEW_WIDGET);
   if (!promptSlot || !previewSlot) return false;
 
+  // Older TerryXu versions converted the interior prompt widget to type=hidden.
+  // A subgraph instance may therefore already contain a valid promotion link
+  // whose host Widget store entry is still the stale hidden type. Re-resolve
+  // official bindings from the now-canonical customtext/BOOLEAN source widgets
+  // so existing subgraphs are upgraded in place instead of requiring repack.
+  try { node.rebuildInputWidgetBindings?.(); } catch {}
+
   const promptInput = hostInputForSlot(node, promptSlot);
   const previewInput = hostInputForSlot(node, previewSlot);
   if (!promptInput || !previewInput || !installRichEditor(node, h3, promptInput, previewInput)) {
