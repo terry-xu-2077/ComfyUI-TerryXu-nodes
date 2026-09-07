@@ -1,0 +1,81 @@
+name: TerryXu subgraph boolean boundary fix v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/terryxu-fix-subgraph-bool-boundary-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch line switch subgraph boundary resolution
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('web/line_switch.js')
+          text = path.read_text(encoding='utf-8')
+
+          needle = '  const origin = flexibleNode(graph, originId);\n  if (!origin) return null;'
+          replacement = '''  const isSubgraphBoundary = Boolean(
+            graph?.inputNode && String(originId) === String(graph.inputNode.id)
+          );
+          const origin = isSubgraphBoundary ? graph.inputNode : flexibleNode(graph, originId);
+          if (!origin) return null;'''
+          if text.count(needle) != 1:
+              raise SystemExit(f'origin block count={text.count(needle)}')
+          text = text.replace(needle, replacement, 1)
+
+          needle = '  if (subgraphInputOrigin(graph, origin)) {'
+          replacement = '  if (isSubgraphBoundary || subgraphInputOrigin(graph, origin)) {'
+          if text.count(needle) != 1:
+              raise SystemExit(f'boundary condition count={text.count(needle)}')
+          text = text.replace(needle, replacement, 1)
+
+          needle = '''    const nodeId = detail.node ?? detail.node_id;
+              const output = detail.output || detail;
+              const node = executionNodeById(nodeId);
+              if (!node) return;'''
+          if needle not in text:
+              # Normal indentation in the JS file is four spaces for each line.
+              needle = '    const nodeId = detail.node ?? detail.node_id;\n    const output = detail.output || detail;\n    const node = executionNodeById(nodeId);\n    if (!node) return;'
+          replacement = '''    const output = detail.output || detail;
+              const node = executionNodeById(detail.node ?? detail.node_id)
+                || executionNodeById(detail.display_node);
+              if (!node) return;'''
+          if needle not in text:
+              raise SystemExit('executed listener block not found')
+          # Normalize indentation after YAML heredoc dedent.
+          replacement = '    const output = detail.output || detail;\n    const node = executionNodeById(detail.node ?? detail.node_id)\n      || executionNodeById(detail.display_node);\n    if (!node) return;'
+          text = text.replace(needle, replacement, 1)
+
+          start = text.index('function selectedBool(node) {')
+          end = text.index('\nfunction routeValues(node)', start)
+          section = text[start:end]
+          needle = '    node.__terryRuntimeBool = value;\n    return value;'
+          replacement = '    node.__terryRuntimeBool = value;\n    properties(node)[BOOL_PROPERTY] = value;\n    return value;'
+          if needle not in section:
+              raise SystemExit('selectedBool live-value block not found')
+          section = section.replace(needle, replacement, 1)
+          text = text[:start] + section + text[end:]
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          rm -f .github/workflows/terryxu-fix-subgraph-bool-boundary.yml
+          rm -f .github/workflows/terryxu-fix-subgraph-bool-boundary-v2.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Resolve boolean controls through subgraph input boundaries"
+          git push
