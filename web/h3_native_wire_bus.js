@@ -1,9 +1,13 @@
 import { app } from "../../scripts/app.js";
 import {
   H3_BUS_TYPE,
+  h3AllGraphs,
   h3BusSignature,
   h3CollectBusMedia,
+  h3CollectBusMediaForExecution,
   h3IsBusLinkInfo,
+  h3IsSubgraphInputLinkInfo,
+  h3IsSubgraphNode,
   h3MediaInputIndex,
   h3MediaKind,
   h3NodeType,
@@ -14,6 +18,13 @@ const TARGETS = {
   TerryXuH3PromptEditor: "terry_h3_virtual_media_links",
   TerryXuH3ShotTimeline: "terry_h3_timeline_virtual_media_links",
 };
+
+const BUS_SOURCE_TYPES = new Set([
+  "TerryXuWireBusPack",
+  "TerryXuWirelessBusPack",
+  "TerryXuWireBusUnpack",
+  "TerryXuWirelessBusUnpack",
+]);
 
 function cloneLink(link) {
   return {
@@ -47,6 +58,112 @@ function refreshNode(node) {
   node.graph?.setDirtyCanvas?.(true, true);
 }
 
+function isH3MediaInput(node, input) {
+  if (!TARGETS[h3NodeType(node)]) return false;
+  if (String(input?.name || "") === "media") return true;
+  return Boolean(node?.inputs?.some?.((slot) => String(slot?.name || "") === "media"));
+}
+
+function subgraphInputSlot(node, input) {
+  if (!h3IsSubgraphNode(node) || !node?.subgraph?.inputNode) return null;
+  const slots = node.subgraph.inputNode.slots || node.subgraph.inputs || [];
+  if (input?._subgraphSlot) {
+    const exact = slots.find((slot) =>
+      slot === input._subgraphSlot
+      || (
+        slot?.id != null
+        && input._subgraphSlot?.id != null
+        && String(slot.id) === String(input._subgraphSlot.id)
+      )
+    );
+    if (exact) return exact;
+  }
+  const inputIndex = node.inputs?.indexOf?.(input) ?? -1;
+  if (inputIndex >= 0 && slots[inputIndex]) return slots[inputIndex];
+  const name = String(input?.name || input?.label || "");
+  return slots.find((slot) => String(slot?.name || "") === name) || null;
+}
+
+function subgraphInputTargets(node, input) {
+  const slot = subgraphInputSlot(node, input);
+  const graph = node?.subgraph;
+  if (!slot || !graph) return [];
+
+  const result = [];
+  for (const linkId of slot.linkIds || []) {
+    const link = graph.getLink?.(linkId)
+      || graph.links?.get?.(linkId)
+      || graph._links?.get?.(linkId)
+      || graph.links?.[linkId]
+      || graph._links?.[linkId];
+    if (!link) continue;
+
+    let targetNode = null;
+    let targetInput = null;
+    try {
+      const resolved = link.resolve?.(graph);
+      targetNode = resolved?.inputNode || null;
+      targetInput = resolved?.input || null;
+    } catch {}
+
+    if (!targetNode) {
+      const targetId = link.target_id ?? link.targetId;
+      const targetSlot = Number(link.target_slot ?? link.targetSlot ?? 0) || 0;
+      targetNode = graph.getNodeById?.(targetId) || null;
+      targetInput = targetNode?.inputs?.[targetSlot] || null;
+    }
+    if (targetNode && targetInput) result.push({ node: targetNode, input: targetInput });
+  }
+  return result;
+}
+
+function subgraphInputLeadsToH3(node, input, seen = new Set()) {
+  if (isH3MediaInput(node, input)) return true;
+  if (!h3IsSubgraphNode(node)) return false;
+
+  const slot = subgraphInputSlot(node, input);
+  const key = `${String(node?.subgraph?.id || node?.id || "subgraph")}:${String(slot?.id || slot?.name || "input")}`;
+  if (seen.has(key)) return false;
+  seen.add(key);
+
+  return subgraphInputTargets(node, input)
+    .some((target) => subgraphInputLeadsToH3(target.node, target.input, seen));
+}
+
+function patchBusSourceClass(nodeTypeClass) {
+  const proto = nodeTypeClass?.prototype;
+  if (!proto || proto.__terryH3SubgraphBusOutput) return;
+  const original = proto.onConnectOutput;
+  if (typeof original !== "function") return;
+
+  const wrapped = function(slot, type, input, targetNode) {
+    const originalResult = original.apply(this, arguments);
+    if (originalResult !== false) return originalResult;
+
+    const outputType = String(this.outputs?.[Number(slot) || 0]?.type || type || "").toUpperCase();
+    if (outputType !== H3_BUS_TYPE) return originalResult;
+    return subgraphInputLeadsToH3(targetNode, input) ? true : originalResult;
+  };
+  wrapped.__terryH3SubgraphBusOutput = true;
+  proto.onConnectOutput = wrapped;
+  proto.__terryH3SubgraphBusOutput = true;
+}
+
+function patchRegisteredBusSources() {
+  const registered = globalThis.LiteGraph?.registered_node_types || {};
+  for (const type of BUS_SOURCE_TYPES) {
+    const cls = registered[type];
+    if (cls) patchBusSourceClass(cls);
+  }
+}
+
+function isPreservedBoundaryConnection(node, index, connected, linkInfo) {
+  if (!connected) return false;
+  const input = node?.inputs?.[Number(index)];
+  if (String(input?.name || "") !== "media") return false;
+  return h3IsBusLinkInfo(node, linkInfo) || h3IsSubgraphInputLinkInfo(node, linkInfo);
+}
+
 function isBusConnection(node, index, connected, linkInfo) {
   if (!connected) return false;
   const input = node?.inputs?.[Number(index)];
@@ -65,13 +182,12 @@ function installTypeGuard(nodeType, nodeData) {
   if (!TARGETS[String(nodeData?.name || "")] || nodeType.prototype.__terryNativeBusTypeGuard) return;
   nodeType.prototype.__terryNativeBusTypeGuard = true;
 
-  // This runs at node-definition registration time, before any graph is restored.
-  // The legacy H3 handler turns every media connection into a virtual reference
-  // and then disconnects the real socket. BUS is different: it must remain a
-  // native visual connection and only be read internally by the H3 resolver.
+  // Direct references are virtualized by the legacy H3 editor. A BUS or a
+  // SubgraphInput boundary must remain a real link so ComfyUI can preserve the
+  // subgraph topology and the BUS resolver can walk through it.
   const legacyConnections = nodeType.prototype.onConnectionsChange;
   nodeType.prototype.onConnectionsChange = function(type, index, connected, linkInfo) {
-    if (isBusConnection(this, index, connected, linkInfo)) {
+    if (isPreservedBoundaryConnection(this, index, connected, linkInfo)) {
       this.__terryProtectBusUntil = performance.now() + 5000;
       queueMicrotask(() => {
         installReferenceView(this);
@@ -105,8 +221,6 @@ function installReferenceView(node) {
     configurable: true,
     enumerable: true,
     get() {
-      // The legacy H3 canvas renderer must only see truly direct references.
-      // BUS members are data references, not visual links.
       if (globalThis.__terryH3NativeBusDrawing) return state.direct.map(cloneLink);
       return uniqueLinks([...state.direct, ...h3CollectBusMedia(node)]);
     },
@@ -134,10 +248,11 @@ function installReferenceView(node) {
   node.onConnectionsChange = function(type, index, connected, linkInfo) {
     const input = this.inputs?.[index];
     const isMedia = String(input?.name || "") === "media";
-    const busConnected = isMedia && connected && (h3IsBusLinkInfo(this, linkInfo) || Boolean(h3ResolveNativeBus(this)));
-    if (busConnected) {
-      this.__terryProtectBusUntil = performance.now() + 5000;
-    }
+    const preserved = isMedia && connected && (
+      isPreservedBoundaryConnection(this, index, connected, linkInfo)
+      || Boolean(h3ResolveNativeBus(this))
+    );
+    if (preserved) this.__terryProtectBusUntil = performance.now() + 5000;
     const result = originalConnections?.apply(this, arguments);
     if (isMedia) queueMicrotask(() => refreshNode(this));
     return result;
@@ -165,7 +280,10 @@ function installReferenceView(node) {
 }
 
 function patchAll() {
-  for (const node of app.graph?._nodes || []) installReferenceView(node);
+  for (const graph of h3AllGraphs()) {
+    for (const node of graph?._nodes || graph?.nodes || []) installReferenceView(node);
+  }
+  patchRegisteredBusSources();
 }
 
 function patchCanvas() {
@@ -189,21 +307,100 @@ function patchCanvas() {
   canvas.drawConnections = guardedDrawConnections;
 }
 
+function matchingExecutionIds(output, node) {
+  const localId = String(node?.id ?? "");
+  const type = h3NodeType(node);
+  if (!localId || !type) return [];
+  return Object.keys(output || {}).filter((id) => {
+    if (!id.includes(":")) return false;
+    if (!(id === localId || id.endsWith(`:${localId}`))) return false;
+    return String(output[id]?.class_type || "") === type;
+  });
+}
+
+function patchGraphToPrompt() {
+  if (app.__terryH3SubgraphBusPromptPatched || typeof app.graphToPrompt !== "function") return;
+  app.__terryH3SubgraphBusPromptPatched = true;
+  const previous = app.graphToPrompt;
+
+  app.graphToPrompt = async function() {
+    const data = await previous.apply(this, arguments);
+    const output = data?.output;
+    if (!output) return data;
+
+    try {
+      const root = this.graph?.rootGraph || app.graph?.rootGraph || app.graph;
+      for (const graph of h3AllGraphs(root)) {
+        if (graph === root) continue;
+        for (const node of graph?._nodes || graph?.nodes || []) {
+          if (!TARGETS[h3NodeType(node)]) continue;
+
+          for (const executionId of matchingExecutionIds(output, node)) {
+            const busMedia = h3CollectBusMediaForExecution(node, executionId);
+            if (!busMedia.length) continue;
+
+            const dst = output[executionId];
+            if (!dst) continue;
+            dst.inputs ||= {};
+            delete dst.inputs.media;
+
+            const existing = Object.entries(dst.inputs)
+              .filter(([name, value]) => /^asset\d+$/i.test(name) && Array.isArray(value))
+              .sort((a, b) => Number(a[0].replace(/\D/g, "")) - Number(b[0].replace(/\D/g, "")))
+              .map(([, value]) => value);
+            for (const key of Object.keys(dst.inputs)) {
+              if (/^asset\d+$/i.test(key)) delete dst.inputs[key];
+            }
+
+            const assets = [];
+            const seen = new Set();
+            for (const value of existing) {
+              const key = `${String(value?.[0] ?? "")}:${Number(value?.[1]) || 0}`;
+              if (!value?.[0] || seen.has(key)) continue;
+              seen.add(key);
+              assets.push([String(value[0]), Number(value[1]) || 0]);
+            }
+            for (const item of busMedia) {
+              const sourceId = String(item?.source_execution_id || "");
+              const sourceSlot = Number(item?.source_slot) || 0;
+              const key = `${sourceId}:${sourceSlot}`;
+              if (!sourceId || !output[sourceId] || seen.has(key)) continue;
+              seen.add(key);
+              assets.push([sourceId, sourceSlot]);
+            }
+
+            assets.forEach((value, index) => {
+              dst.inputs[`asset${index + 1}`] = value;
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("[TerryXu H3] Failed to expand BUS through subgraph boundary", error);
+    }
+    return data;
+  };
+}
+
 let timer = null;
 function start() {
   patchAll();
   patchCanvas();
+  patchGraphToPrompt();
   if (timer) return;
   timer = setInterval(() => {
     patchAll();
     patchCanvas();
-    for (const node of app.graph?._nodes || []) {
-      const prop = TARGETS[h3NodeType(node)];
-      if (!prop || !node.__terryNativeBus) continue;
-      const signature = h3BusSignature(node);
-      if (node.__terryNativeBusSignature !== signature) {
-        node.__terryNativeBusSignature = signature;
-        refreshNode(node);
+    patchGraphToPrompt();
+    for (const graph of h3AllGraphs()) {
+      for (const node of graph?._nodes || graph?.nodes || []) {
+        const prop = TARGETS[h3NodeType(node)];
+        if (!prop || !node.__terryNativeBus) continue;
+        const signature = h3BusSignature(node);
+        if (node.__terryNativeBusSignature !== signature) {
+          node.__terryNativeBusSignature = signature;
+          refreshNode(node);
+        }
       }
     }
   }, 300);
@@ -213,19 +410,31 @@ app.registerExtension({
   name: "TerryXu.H3NativeWireBus",
   setup() {
     start();
-    queueMicrotask(() => { patchAll(); patchCanvas(); });
-    setTimeout(() => { patchAll(); patchCanvas(); }, 0);
+    queueMicrotask(() => { patchAll(); patchCanvas(); patchGraphToPrompt(); });
+    setTimeout(() => { patchAll(); patchCanvas(); patchGraphToPrompt(); }, 0);
   },
   beforeRegisterNodeDef(nodeType, nodeData) {
     installTypeGuard(nodeType, nodeData);
+    if (BUS_SOURCE_TYPES.has(String(nodeData?.name || ""))) {
+      // WireBus installs its normal connection policy in another extension.
+      // Defer our H3/subgraph extension so it wraps the final policy instead
+      // of competing with it.
+      queueMicrotask(() => patchBusSourceClass(nodeType));
+    }
   },
   nodeCreated(node) {
-    queueMicrotask(() => installReferenceView(node));
+    queueMicrotask(() => {
+      installReferenceView(node);
+      if (BUS_SOURCE_TYPES.has(h3NodeType(node))) patchBusSourceClass(node.constructor);
+    });
   },
   loadedGraphNode(node) {
-    queueMicrotask(() => installReferenceView(node));
+    queueMicrotask(() => {
+      installReferenceView(node);
+      if (BUS_SOURCE_TYPES.has(h3NodeType(node))) patchBusSourceClass(node.constructor);
+    });
   },
   afterConfigureGraph() {
-    queueMicrotask(() => { patchAll(); patchCanvas(); });
+    queueMicrotask(() => { patchAll(); patchCanvas(); patchGraphToPrompt(); });
   },
 });
