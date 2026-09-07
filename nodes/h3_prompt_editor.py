@@ -58,6 +58,11 @@ class H3PromptEditor(io.ComfyNode):
             min=0,
         )
 
+        text_input_type = io.MatchType.Template(
+            "terry_h3_source_text",
+            allowed_types=[io.String, io.Custom("TEXT")],
+        )
+
         return io.Schema(
             node_id="TerryXuH3PromptEditor",
             display_name="📃 H3提示词编辑器",
@@ -65,20 +70,19 @@ class H3PromptEditor(io.ComfyNode):
             search_aliases=["MiniMax H3", "H3 prompt", "H3 提示词", "reference prompt", "text preview"],
             description=(
                 "可视化编写 MiniMax H3 提示词；支持动态数量图片、视频、音频参考；"
-                "可连接外部 STRING 作为只读 H3 预览；@ 插入媒体，/ 打开 H3 语法菜单；"
+                "可连接外部 STRING / TEXT 作为只读 H3 预览；@ 插入媒体，/ 打开 H3 语法菜单；"
                 "输出始终为标准 H3 原文 STRING。"
             ),
             inputs=[
                 io.String.Input("prompt", display_name="H3 原文", multiline=True, default=""),
-                io.String.Input(
+                io.MatchType.Input(
                     "source_text",
+                    template=text_input_type,
                     display_name="文本输入 · 只读预览",
-                    default="",
-                    force_input=True,
                     optional=True,
                     tooltip=(
-                        "连接 STRING 后，编辑区自动切换为只读预览；标签格式化、中文标签、"
-                        "媒体缩略图及可视化/原文切换继续正常工作。"
+                        "可连接 STRING 或 TEXT。连接后编辑区自动切换为只读预览；"
+                        "标签格式化、中文标签、媒体缩略图及可视化/原文切换继续正常工作。"
                     ),
                 ),
                 io.Boolean.Input(
@@ -97,14 +101,16 @@ class H3PromptEditor(io.ComfyNode):
     def execute(
         cls,
         prompt: str,
-        source_text: str | None = None,
+        source_text: Any | None = None,
         visual_preview: bool = True,
         assets: io.Autogrow.Type | None = None,
         **asset_inputs,
     ) -> io.NodeOutput:
-        # A connected STRING turns the node into a read-only preview/pass-through
-        # node. An intentionally empty upstream string must remain empty, so only
-        # None means "not connected / no value supplied" here.
+        # A connected STRING or TEXT turns the node into a read-only
+        # preview/pass-through node. TEXT custom types are expected to carry
+        # textual runtime values; normalize them to Python str for output/rendering.
+        # An intentionally empty upstream value must remain empty, so only None
+        # means "not connected / no value supplied" here.
         effective_prompt = str(source_text) if source_text is not None else str(prompt or "")
 
         counts = {"picture": 0, "video": 0, "audio": 0, "other": 0}
