@@ -485,11 +485,14 @@ function setupSubgraphNode(node, attempt = 0) {
   if (!promptSlot || !previewSlot) return false;
 
   // Older TerryXu versions converted the interior prompt widget to type=hidden.
-  // A subgraph instance may therefore already contain a valid promotion link
-  // whose host Widget store entry is still the stale hidden type. Re-resolve
-  // official bindings from the now-canonical customtext/BOOLEAN source widgets
-  // so existing subgraphs are upgraded in place instead of requiring repack.
-  try { node.rebuildInputWidgetBindings?.(); } catch {}
+  // Migrate each subgraph instance once; after that the 300 ms refresh loop only
+  // updates H3 content and never recreates ComfyUI's promoted host widgets.
+  if (!node.__terryH3PromotionBindingsRebuilt) {
+    try {
+      node.rebuildInputWidgetBindings?.();
+      node.__terryH3PromotionBindingsRebuilt = true;
+    } catch {}
+  }
 
   const promptInput = hostInputForSlot(node, promptSlot);
   const previewInput = hostInputForSlot(node, previewSlot);
