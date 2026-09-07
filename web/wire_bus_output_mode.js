@@ -13,6 +13,7 @@ const UNPACK_LANES_PROPERTY = "terry_wire_bus_lane_ids";
 const LANE_FIELD = "terry_lane_id";
 const BUS_OUTPUT_FIELD = "terry_bus_passthrough_output";
 const MODE_ROW_HEIGHT = 30;
+const WIRELESS_CHANNEL_BLOCK_HEIGHT = 40;
 
 function localeCode() {
   try {
@@ -80,6 +81,19 @@ function ensureModeWidgetOrder(node) {
   widgets.splice(nextChannelIndex + 1, 0, mode);
 }
 
+function applyWidgetStartY(node, height = null) {
+  if (!isUnpack(node) || !modeWidget(node) || node.flags?.collapsed) return;
+  ensureModeWidgetOrder(node);
+
+  const finalHeight = Math.max(0, Number(height ?? node.size?.[1]) || 0);
+  const reserved = MODE_ROW_HEIGHT
+    + (isWirelessUnpack(node) ? WIRELESS_CHANNEL_BLOCK_HEIGHT : 0);
+
+  node.widgets_start_y = Math.max(0, finalHeight - reserved);
+  node._widgetSlotsDirty = true;
+  node.graph?.setDirtyCanvas?.(true, true);
+}
+
 function installSizeGuard(node) {
   if (!isUnpack(node) || node.__terryBusOutputModeSizeGuard) return;
   const original = node.setSize;
@@ -94,7 +108,9 @@ function installSizeGuard(node) {
       || !modeWidget(this)
       || !Array.isArray(size)
     ) {
-      return original.apply(this, arguments);
+      const result = original.apply(this, arguments);
+      if (!this.flags?.collapsed && modeWidget(this)) applyWidgetStartY(this);
+      return result;
     }
 
     const next = [...size];
@@ -109,10 +125,13 @@ function installSizeGuard(node) {
     }
 
     const result = original.call(this, next);
+    const finalHeight = Math.max(0, Number(this.size?.[1]) || Number(next[1]) || 0);
+    applyWidgetStartY(this, finalHeight);
+
     if (!this.flags?.collapsed) {
       this.__terryBusExpandedSize = [
         Math.max(112, Number(next[0]) || Number(this.size?.[0]) || 112),
-        Math.max(0, Number(next[1]) || 0),
+        finalHeight,
       ];
     }
     return result;
@@ -131,10 +150,9 @@ function ensureModeLayout(node) {
 
   if (baseHeight <= 0 || currentHeight + 0.5 < desiredHeight) {
     node.setSize?.([width, baseHeight > 0 ? baseHeight : currentHeight]);
+  } else {
+    applyWidgetStartY(node, currentHeight);
   }
-
-  node._widgetSlotsDirty = true;
-  node.graph?.setDirtyCanvas?.(true, true);
 }
 
 function getLink(graph, linkId) {
