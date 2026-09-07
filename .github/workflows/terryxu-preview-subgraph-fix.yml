@@ -20,41 +20,48 @@ jobs:
         run: |
           from pathlib import Path
 
-          def replace_once(path, old, new):
-              p = Path(path)
-              text = p.read_text(encoding='utf-8')
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected 1 match, got {count}')
-              p.write_text(text.replace(old, new), encoding='utf-8')
-
-          replace_once(
-              'nodes/h3_prompt_editor.py',
-              '''        return io.NodeOutput(\n            effective_prompt,\n            ui={\n                "terry_h3_assets": result,\n                "terry_h3_preview_text": effective_prompt,\n            },\n        )\n''',
-              '''        # Match ComfyUI's official text preview transport. PreviewText\n        # serializes the UI payload as {"text": (value,)}, which means the\n        # normal executed/onExecuted cache lifecycle can restore it reliably.\n        preview_ui = ui.PreviewText(effective_prompt).as_dict()\n        preview_ui["terry_h3_assets"] = result\n        return io.NodeOutput(\n            effective_prompt,\n            ui=preview_ui,\n        )\n'''
+          # H3: use the same UI payload shape as ComfyUI's official PreviewText:
+          # {"text": (value,)}. Keep H3 asset metadata alongside it.
+          p = Path('nodes/h3_prompt_editor.py')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace(
+              '"terry_h3_preview_text": effective_prompt,',
+              '"text": (effective_prompt,),'
           )
+          p.write_text(text, encoding='utf-8')
 
-          replace_once(
-              'web/h3_text_preview_mode.js',
-              '  let value = output?.terry_h3_preview_text;\n',
-              '  let value = output?.text ?? output?.terry_h3_preview_text;\n'
+          # Frontend: consume official PreviewText first, with old key as fallback.
+          p = Path('web/h3_text_preview_mode.js')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace(
+              'let value = output?.terry_h3_preview_text;',
+              'let value = output?.text ?? output?.terry_h3_preview_text;'
           )
+          p.write_text(text, encoding='utf-8')
 
-          replace_once(
-              'web/line_switch.js',
-              '''  const origin = flexibleNode(graph, originId);\n  if (!origin) return null;\n\n  if (subgraphInputOrigin(graph, origin)) {\n''',
-              '''  // SubgraphInputNode is a virtual IO node and is not guaranteed to be\n  // returned by graph.getNodeById(). Resolve the sentinel input node directly\n  // before normal node lookup so promoted/exposed controls can be traced out to\n  // the parent SubgraphNode input.\n  const boundaryOrigin = graph?.inputNode && String(originId) === String(graph.inputNode.id)\n    ? graph.inputNode\n    : null;\n  const origin = boundaryOrigin || flexibleNode(graph, originId);\n  if (!origin) return null;\n\n  if (subgraphInputOrigin(graph, origin)) {\n'''
+          # Subgraph control: SubgraphInputNode is virtual and may not be returned
+          # by getNodeById(), so resolve graph.inputNode directly before climbing
+          # through the parent SubgraphNode input.
+          p = Path('web/line_switch.js')
+          text = p.read_text(encoding='utf-8')
+          old = '''  const origin = flexibleNode(graph, originId);\n  if (!origin) return null;\n\n  if (subgraphInputOrigin(graph, origin)) {'''
+          new = '''  const boundaryOrigin = graph?.inputNode && String(originId) === String(graph.inputNode.id)\n    ? graph.inputNode\n    : null;\n  const origin = boundaryOrigin || flexibleNode(graph, originId);\n  if (!origin) return null;\n\n  if (subgraphInputOrigin(graph, origin)) {'''
+          text = text.replace(old, new)
+          text = text.replace(
+              'const nodeId = detail.node ?? detail.node_id;',
+              'const nodeId = detail.display_node ?? detail.node ?? detail.node_id;'
           )
+          p.write_text(text, encoding='utf-8')
 
-          replace_once(
-              'web/line_switch.js',
-              '    const nodeId = detail.node ?? detail.node_id;\n',
-              '    const nodeId = detail.display_node ?? detail.node ?? detail.node_id;\n'
-          )
+          print('patched')
       - name: Commit fixes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add nodes/h3_prompt_editor.py web/h3_text_preview_mode.js web/line_switch.js
-          git commit -m "Use official text preview transport and fix subgraph bool tracing"
-          git push
+          if git diff --cached --quiet; then
+            echo "No changes needed"
+          else
+            git commit -m "Use official text preview payload and fix subgraph bool tracing"
+            git push
+          fi
