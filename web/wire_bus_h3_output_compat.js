@@ -1,6 +1,16 @@
 import { app } from "../../scripts/app.js";
 
-const PACK_TYPE = "TerryXuWirelessBusPack";
+const BUS_TYPE = "TERRY_WIRE_BUS";
+const SOURCE_TYPES = new Set([
+  "TerryXuWireBusPack",
+  "TerryXuWirelessBusPack",
+  "TerryXuWireBusUnpack",
+  "TerryXuWirelessBusUnpack",
+]);
+const PACK_TYPES = new Set([
+  "TerryXuWireBusPack",
+  "TerryXuWirelessBusPack",
+]);
 const H3_TYPES = new Set(["TerryXuH3PromptEditor", "TerryXuH3ShotTimeline"]);
 
 function nodeType(node) {
@@ -20,37 +30,51 @@ function isH3MediaTarget(node, input) {
   return Boolean(node?.inputs?.some?.((slot) => String(slot?.name || "") === "media"));
 }
 
-function patchPackClass(nodeTypeClass) {
+function isBusOutput(node, slot, type) {
+  const sourceType = nodeType(node);
+  const index = Number(slot) || 0;
+  if (PACK_TYPES.has(sourceType)) return index === 0;
+  const outputType = String(node?.outputs?.[index]?.type || type || "").toUpperCase();
+  return outputType === BUS_TYPE;
+}
+
+function patchSourceClass(nodeTypeClass) {
   if (!nodeTypeClass?.prototype || nodeTypeClass.prototype.__terryH3OutputCompat) return;
   const original = nodeTypeClass.prototype.onConnectOutput;
   nodeTypeClass.prototype.__terryH3OutputCompat = true;
   nodeTypeClass.prototype.onConnectOutput = function(slot, type, input, targetNode) {
-    if (slot === 0 && isH3MediaTarget(targetNode, input)) return true;
+    if (isBusOutput(this, slot, type) && isH3MediaTarget(targetNode, input)) return true;
     return original ? original.apply(this, arguments) : true;
   };
 }
 
-function patchRegisteredPack() {
-  const cls = globalThis.LiteGraph?.registered_node_types?.[PACK_TYPE];
-  if (cls) patchPackClass(cls);
+function patchRegisteredSources() {
+  const registered = globalThis.LiteGraph?.registered_node_types || {};
+  for (const type of SOURCE_TYPES) {
+    const cls = registered[type];
+    if (cls) patchSourceClass(cls);
+  }
 }
 
 app.registerExtension({
   name: "TerryXu.WireBusH3OutputCompat",
 
   beforeRegisterNodeDef(nodeTypeClass, nodeData) {
-    if (nodeData?.name !== PACK_TYPE) return;
-    // Run after the other beforeRegisterNodeDef hooks have had a chance to install
-    // their restrictions, then wrap the final handler instead of replacing BUS logic.
-    queueMicrotask(() => patchPackClass(nodeTypeClass));
+    if (!SOURCE_TYPES.has(String(nodeData?.name || ""))) return;
+    // Wrap after the base BUS node has installed its own connection rules.
+    queueMicrotask(() => patchSourceClass(nodeTypeClass));
   },
 
   setup() {
-    queueMicrotask(patchRegisteredPack);
-    setTimeout(patchRegisteredPack, 0);
+    queueMicrotask(patchRegisteredSources);
+    setTimeout(patchRegisteredSources, 0);
   },
 
   nodeCreated(node) {
-    if (nodeType(node) === PACK_TYPE) patchPackClass(node.constructor);
+    if (SOURCE_TYPES.has(nodeType(node))) patchSourceClass(node.constructor);
+  },
+
+  loadedGraphNode(node) {
+    if (SOURCE_TYPES.has(nodeType(node))) patchSourceClass(node.constructor);
   },
 });
