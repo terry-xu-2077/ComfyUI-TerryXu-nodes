@@ -159,23 +159,98 @@ function clampIndex(value, count) {
   return Math.max(1, Math.min(parsed, safeCount));
 }
 
-function upstreamWidgetValue(node, input) {
-  if (!input || input.link == null || !node?.graph) return null;
-  const link = getLink(node.graph, input.link);
+function flexibleNode(graph, id) {
+  if (!graph || id == null) return null;
+  return graph.getNodeById?.(id)
+    || graph.getNodeById?.(String(id))
+    || (Number.isFinite(Number(id)) ? graph.getNodeById?.(Number(id)) : null)
+    || null;
+}
+
+function subgraphInputOrigin(graph, node) {
+  if (!graph?.inputNode || !node) return false;
+  return node === graph.inputNode || String(node.id) === String(graph.inputNode.id);
+}
+
+function wrapperInputForSubgraph(instance, subgraph, slotIndex) {
+  const slot = subgraph?.inputNode?.slots?.[Number(slotIndex) || 0]
+    || subgraph?.inputs?.[Number(slotIndex) || 0]
+    || null;
+  const inputs = instance?.inputs || [];
+  if (slot) {
+    let index = inputs.findIndex((input) =>
+      input?._subgraphSlot === slot
+      || (
+        input?._subgraphSlot?.id != null
+        && slot?.id != null
+        && String(input._subgraphSlot.id) === String(slot.id)
+      )
+    );
+    if (index < 0 && slot?.name) {
+      index = inputs.findIndex((input) => String(input?.name || "") === String(slot.name));
+    }
+    if (index >= 0) return inputs[index];
+  }
+  return inputs[Number(slotIndex) || 0] || null;
+}
+
+function upstreamWidgetValueFromLink(graph, linkId, seen = new Set()) {
+  if (!graph || linkId == null) return null;
+  const key = `${String(graph?.id || "g")}:${String(linkId)}`;
+  if (seen.has(key)) return null;
+  seen.add(key);
+
+  const link = getLink(graph, linkId);
   if (!link) return null;
-  const origin = getNode(node.graph, link.origin_id ?? link.originId);
+  const originId = link.origin_id ?? link.originId;
+  const originSlot = Number(link.origin_slot ?? link.originSlot ?? 0) || 0;
+  const origin = flexibleNode(graph, originId);
   if (!origin) return null;
+
+  if (subgraphInputOrigin(graph, origin)) {
+    for (const parentGraph of allGraphs()) {
+      for (const instance of parentGraph?._nodes || parentGraph?.nodes || []) {
+        if (instance?.subgraph !== graph) continue;
+        const wrapperInput = wrapperInputForSubgraph(instance, graph, originSlot);
+        if (!wrapperInput) continue;
+        if (wrapperInput.link != null) {
+          const value = upstreamWidgetValueFromLink(instance.graph || parentGraph, wrapperInput.link, seen);
+          if (value !== null && value !== undefined) return value;
+        }
+        const promoted = widgetByName(instance, wrapperInput.name);
+        if (promoted?.value !== undefined) return promoted.value;
+      }
+    }
+    return null;
+  }
+
+  const type = nodeType(origin).toLowerCase();
+  if ((type === "reroute" || type.endsWith("reroute")) && origin.inputs?.[0]?.link != null) {
+    return upstreamWidgetValueFromLink(origin.graph || graph, origin.inputs[0].link, seen);
+  }
+
   for (const widget of origin.widgets || []) {
     if (widget?.value !== undefined) return widget.value;
   }
   return null;
 }
 
+function upstreamWidgetValue(node, input) {
+  if (!input || input.link == null || !node?.graph) return null;
+  return upstreamWidgetValueFromLink(node.graph, input.link);
+}
+
 function selectedIndex(node) {
   const count = routeInputs(node).length;
   if (indexInput(node)?.link != null) {
     const live = Number.parseInt(upstreamWidgetValue(node, indexInput(node)), 10);
-    if (Number.isFinite(live)) return clampIndex(live, count);
+    if (Number.isFinite(live)) {
+    const next = clampIndex(live, count);
+    const widget = indexWidget(node);
+    if (widget) widget.value = next;
+    node.__terryRuntimeIndex = next;
+    return next;
+  }
     const runtime = Number(properties(node)[INDEX_PROPERTY] ?? node.__terryRuntimeIndex);
     if (Number.isFinite(runtime)) return clampIndex(runtime, count);
   }
@@ -185,7 +260,13 @@ function selectedIndex(node) {
 function selectedBool(node) {
   if (boolInput(node)?.link != null) {
     const live = upstreamWidgetValue(node, boolInput(node));
-    if (live !== null && live !== undefined) return Boolean(live);
+    if (live !== null && live !== undefined) {
+    const value = Boolean(live);
+    const widget = boolWidget(node);
+    if (widget) widget.value = value;
+    node.__terryRuntimeBool = value;
+    return value;
+  }
     if (node.__terryRuntimeBool !== undefined) return Boolean(node.__terryRuntimeBool);
     if (properties(node)[BOOL_PROPERTY] !== undefined) return Boolean(properties(node)[BOOL_PROPERTY]);
   }
@@ -644,6 +725,41 @@ function startAnimation() {
   requestAnimationFrame(tick);
 }
 
+function executionNodeById(nodeId) {
+  const raw = String(nodeId ?? "");
+  if (!raw) return null;
+
+  // Ordinary top-level IDs first.
+  for (const graph of allGraphs()) {
+    const direct = flexibleNode(graph, raw);
+    if (direct) return direct;
+  }
+
+  // ComfyUI flattens nested subgraph execution IDs as
+  // instance:instance:localNode. Resolve the exact instance path so
+  // equal local IDs in different subgraphs do not collide.
+  if (raw.includes(":")) {
+    const parts = raw.split(":").filter((part) => part !== "");
+    let graph = app.graph?.rootGraph || app.graph;
+    for (let index = 0; graph && index < parts.length - 1; index++) {
+      const instance = flexibleNode(graph, parts[index]);
+      graph = instance?.subgraph || null;
+    }
+    if (graph && parts.length) {
+      const exact = flexibleNode(graph, parts[parts.length - 1]);
+      if (exact) return exact;
+    }
+
+    // Fallback for frontends that prepend a non-node execution scope.
+    const localId = parts[parts.length - 1];
+    const matches = allGraphs()
+      .map((graph) => flexibleNode(graph, localId))
+      .filter(Boolean);
+    if (matches.length === 1) return matches[0];
+  }
+  return null;
+}
+
 function installExecutedListener() {
   if (globalThis.__terryControlExecutedListener) return;
   globalThis.__terryControlExecutedListener = true;
@@ -651,38 +767,48 @@ function installExecutedListener() {
     const detail = event?.detail || {};
     const nodeId = detail.node ?? detail.node_id;
     const output = detail.output || detail;
-    for (const graph of allGraphs()) {
-      const node = graph?.getNodeById?.(nodeId);
-      if (!node) continue;
-      if (isLine(node)) {
-        const raw = output?.terry_line_switch_index;
-        const parsed = Number.parseInt(Array.isArray(raw) ? raw[0] : raw, 10);
-        if (Number.isFinite(parsed)) {
-          node.__terryRuntimeIndex = parsed;
-          properties(node)[INDEX_PROPERTY] = parsed;
-          node.graph?.setDirtyCanvas?.(true, true);
-          refreshAllRemotes();
+    const node = executionNodeById(nodeId);
+    if (!node) return;
+
+    if (isLine(node)) {
+      const raw = output?.terry_line_switch_index;
+      const parsed = Number.parseInt(Array.isArray(raw) ? raw[0] : raw, 10);
+      if (Number.isFinite(parsed)) {
+        const value = clampIndex(parsed, routeValues(node).length);
+        node.__terryRuntimeIndex = value;
+        properties(node)[INDEX_PROPERTY] = value;
+        if (indexInput(node)?.link != null) {
+          const widget = indexWidget(node);
+          if (widget) widget.value = value;
         }
-      } else if (isBool(node)) {
-        const raw = output?.terry_bool_switch_state;
-        if (raw !== undefined) {
-          const value = Boolean(Array.isArray(raw) ? raw[0] : raw);
-          node.__terryRuntimeBool = value;
-          properties(node)[BOOL_PROPERTY] = value;
-          node.graph?.setDirtyCanvas?.(true, true);
-          refreshAllRemotes();
-        }
-      } else if (isBoolean(node)) {
-        const raw = output?.terry_boolean_switch_state;
-        if (raw !== undefined) {
-          const value = Boolean(Array.isArray(raw) ? raw[0] : raw);
-          node.__terryRuntimeBool = value;
-          properties(node)[BOOL_PROPERTY] = value;
-          node.graph?.setDirtyCanvas?.(true, true);
-          refreshAllRemotes();
-        }
+        globalThis.__terrySyncSwitchUI?.(node);
+        node.graph?.setDirtyCanvas?.(true, true);
+        refreshAllRemotes();
       }
-      break;
+    } else if (isBool(node)) {
+      const raw = output?.terry_bool_switch_state;
+      if (raw !== undefined) {
+        const value = Boolean(Array.isArray(raw) ? raw[0] : raw);
+        node.__terryRuntimeBool = value;
+        properties(node)[BOOL_PROPERTY] = value;
+        if (boolInput(node)?.link != null) {
+          const widget = boolWidget(node);
+          if (widget) widget.value = value;
+        }
+        globalThis.__terrySyncSwitchUI?.(node);
+        node.graph?.setDirtyCanvas?.(true, true);
+        refreshAllRemotes();
+      }
+    } else if (isBoolean(node)) {
+      const raw = output?.terry_boolean_switch_state;
+      if (raw !== undefined) {
+        const value = Boolean(Array.isArray(raw) ? raw[0] : raw);
+        node.__terryRuntimeBool = value;
+        properties(node)[BOOL_PROPERTY] = value;
+        globalThis.__terrySyncSwitchUI?.(node);
+        node.graph?.setDirtyCanvas?.(true, true);
+        refreshAllRemotes();
+      }
     }
   });
 }

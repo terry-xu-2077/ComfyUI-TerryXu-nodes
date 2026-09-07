@@ -7,6 +7,5 @@ __all__ = [
     "BooleanSwitch",
     "BoolSwitch",
     "H3PromptEditor",
-    "H3PreviewSink",
     "LineSwitch",
 ]

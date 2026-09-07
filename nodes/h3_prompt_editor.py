@@ -104,6 +104,7 @@ class H3PromptEditor(io.ComfyNode):
                 "可连接外部 STRING / TEXT 作为只读 H3 预览；@ 插入媒体，/ 打开 H3 语法菜单；"
                 "输出始终为标准 H3 原文 STRING。"
             ),
+            is_output_node=True,
             has_intermediate_output=True,
             inputs=[
                 io.String.Input("prompt", display_name="H3 原文", multiline=True, default=""),
@@ -210,32 +211,3 @@ class H3PromptEditor(io.ComfyNode):
                 "terry_h3_preview_text": effective_prompt,
             },
         )
-
-
-class H3PreviewSink(io.ComfyNode):
-    """Internal output sink that keeps connected H3 text previews executable."""
-
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="TerryXuH3PreviewSink",
-            display_name="H3 Preview Sink",
-            category="TerryXu/Internal",
-            description="Internal execution sink used by the H3 read-only preview UI.",
-            is_output_node=True,
-            is_dev_only=True,
-            not_idempotent=True,
-            inputs=[
-                io.String.Input(
-                    "text",
-                    display_name="text",
-                    force_input=True,
-                    socketless=False,
-                ),
-            ],
-            outputs=[],
-        )
-
-    @classmethod
-    def execute(cls, text: str = "") -> io.NodeOutput:
-        return io.NodeOutput()

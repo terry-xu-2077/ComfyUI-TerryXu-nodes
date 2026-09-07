@@ -14,6 +14,7 @@ class BoolSwitch(io.ComfyNode):
                 "使用布尔值在两路任意输入之间切换，可通过远程控制器按名称控制。"
                 "数据端使用真正的 AnyType，以保证节点放入 ComfyUI 子图后仍可正常切换。"
             ),
+            has_intermediate_output=True,
             inputs=[
                 io.Boolean.Input(
                     "enabled",
