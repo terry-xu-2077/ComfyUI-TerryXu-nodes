@@ -164,39 +164,66 @@ function isPreservedBoundaryConnection(node, index, connected, linkInfo) {
   return h3IsBusLinkInfo(node, linkInfo) || h3IsSubgraphInputLinkInfo(node, linkInfo);
 }
 
-function isBusConnection(node, index, connected, linkInfo) {
-  if (!connected) return false;
-  const input = node?.inputs?.[Number(index)];
-  if (String(input?.name || "") !== "media") return false;
-  if (h3IsBusLinkInfo(node, linkInfo)) return true;
+function installTypeGuard(nodeType, nodeData) {
+  const targetType = String(
+    nodeData?.name
+      || nodeType?.comfyClass
+      || nodeType?.type
+      || nodeType?.nodeData?.name
+      || ""
+  );
+  if (!TARGETS[targetType]) return;
+  const proto = nodeType?.prototype;
+  if (!proto) return;
 
-  const originId = linkInfo?.origin_id ?? linkInfo?.originId ?? linkInfo?.from_id ?? linkInfo?.fromId;
-  const originSlot = Number(linkInfo?.origin_slot ?? linkInfo?.originSlot ?? linkInfo?.from_slot ?? linkInfo?.fromSlot ?? 0) || 0;
-  const graph = node?.graph || app.graph;
-  const origin = linkInfo?.origin_node ?? linkInfo?.originNode ?? linkInfo?.fromNode ?? graph?.getNodeById?.(Number(originId));
-  const originType = String(origin?.outputs?.[originSlot]?.type || linkInfo?.type || "").toUpperCase();
-  return originType === H3_BUS_TYPE;
+  // h3_prompt_editor.js is loaded after this module alphabetically and wraps
+  // onConnectionsChange itself. Therefore the BUS guard must be applied to the
+  // CURRENT handler and may need to be re-applied later if another extension
+  // replaced it. Mark the wrapper function, not the prototype.
+  const currentConnections = proto.onConnectionsChange;
+  if (!currentConnections?.__terryNativeBusTypeGuard) {
+    const wrappedConnections = function(type, index, connected, linkInfo) {
+      if (isPreservedBoundaryConnection(this, index, connected, linkInfo)) {
+        this.__terryProtectBusUntil = performance.now() + 5000;
+        queueMicrotask(() => {
+          installReferenceView(this);
+          refreshNode(this);
+        });
+        return;
+      }
+      return currentConnections?.apply(this, arguments);
+    };
+    wrappedConnections.__terryNativeBusTypeGuard = true;
+    proto.onConnectionsChange = wrappedConnections;
+  }
+
+  // H3's legacy editor serializes node.properties[virtual_links]. The native
+  // BUS view intentionally exposes expanded BUS media through that property for
+  // preview/execution, but those derived entries must NEVER be written into the
+  // workflow. Persist only real direct virtual references.
+  const currentSerialize = proto.onSerialize;
+  if (!currentSerialize?.__terryNativeBusSerializeGuard) {
+    const wrappedSerialize = function(info) {
+      const result = currentSerialize?.apply(this, arguments);
+      const prop = TARGETS[h3NodeType(this)] || TARGETS[targetType];
+      const direct = this.__terryNativeBus?.getDirectLinks?.();
+      if (info && prop && Array.isArray(direct)) {
+        info.properties ||= {};
+        info.properties[prop] = direct.map(cloneLink);
+      }
+      return result;
+    };
+    wrappedSerialize.__terryNativeBusSerializeGuard = true;
+    proto.onSerialize = wrappedSerialize;
+  }
 }
 
-function installTypeGuard(nodeType, nodeData) {
-  if (!TARGETS[String(nodeData?.name || "")] || nodeType.prototype.__terryNativeBusTypeGuard) return;
-  nodeType.prototype.__terryNativeBusTypeGuard = true;
-
-  // Direct references are virtualized by the legacy H3 editor. A BUS or a
-  // SubgraphInput boundary must remain a real link so ComfyUI can preserve the
-  // subgraph topology and the BUS resolver can walk through it.
-  const legacyConnections = nodeType.prototype.onConnectionsChange;
-  nodeType.prototype.onConnectionsChange = function(type, index, connected, linkInfo) {
-    if (isPreservedBoundaryConnection(this, index, connected, linkInfo)) {
-      this.__terryProtectBusUntil = performance.now() + 5000;
-      queueMicrotask(() => {
-        installReferenceView(this);
-        refreshNode(this);
-      });
-      return;
-    }
-    return legacyConnections?.apply(this, arguments);
-  };
+function patchRegisteredH3Targets() {
+  const registered = globalThis.LiteGraph?.registered_node_types || {};
+  for (const type of Object.keys(TARGETS)) {
+    const cls = registered[type];
+    if (cls) installTypeGuard(cls, { name: type });
+  }
 }
 
 function installReferenceView(node) {
@@ -207,29 +234,37 @@ function installReferenceView(node) {
   delete node.properties.terry_h3_wire_bus_visual_state;
 
   const initial = Array.isArray(node.properties[prop]) ? node.properties[prop].map(cloneLink) : [];
-  const initialBusKeys = new Set(h3CollectBusMedia(node).map((item) => `${item.source_id}:${item.source_slot}`));
   const state = {
-    direct: uniqueLinks(initial).filter((link) => {
-      if (String(link?.source_type || "").toUpperCase() === H3_BUS_TYPE) return false;
-      return !initialBusKeys.has(`${Number(link?.source_id)}:${Number(link?.source_slot) || 0}`);
-    }),
+    direct: uniqueLinks(initial).filter((link) =>
+      String(link?.source_type || "").toUpperCase() !== H3_BUS_TYPE
+    ),
   };
 
-  const busKeys = () => new Set(h3CollectBusMedia(node).map((item) => `${item.source_id}:${item.source_slot}`));
+  const busKeys = () => new Set(
+    h3CollectBusMedia(node).map((item) => `${Number(item?.source_id)}:${Number(item?.source_slot) || 0}`)
+  );
+
+  const cleanDirect = () => {
+    const bus = busKeys();
+    const cleaned = uniqueLinks(state.direct).filter((link) => {
+      if (String(link?.source_type || "").toUpperCase() === H3_BUS_TYPE) return false;
+      return !bus.has(`${Number(link?.source_id)}:${Number(link?.source_slot) || 0}`);
+    });
+    state.direct = cleaned;
+    return cleaned;
+  };
 
   Object.defineProperty(node.properties, prop, {
     configurable: true,
     enumerable: true,
     get() {
-      if (globalThis.__terryH3NativeBusDrawing) return state.direct.map(cloneLink);
-      return uniqueLinks([...state.direct, ...h3CollectBusMedia(node)]);
+      const direct = cleanDirect();
+      if (globalThis.__terryH3NativeBusDrawing) return direct.map(cloneLink);
+      return uniqueLinks([...direct, ...h3CollectBusMedia(node)]);
     },
     set(value) {
-      const bus = busKeys();
-      state.direct = uniqueLinks(Array.isArray(value) ? value : []).filter((link) => {
-        if (String(link?.source_type || "").toUpperCase() === H3_BUS_TYPE) return false;
-        return !bus.has(`${Number(link?.source_id)}:${Number(link?.source_slot) || 0}`);
-      });
+      state.direct = uniqueLinks(Array.isArray(value) ? value : []);
+      cleanDirect();
     },
   });
 
@@ -254,14 +289,18 @@ function installReferenceView(node) {
     );
     if (preserved) this.__terryProtectBusUntil = performance.now() + 5000;
     const result = originalConnections?.apply(this, arguments);
-    if (isMedia) queueMicrotask(() => refreshNode(this));
+    if (isMedia) queueMicrotask(() => {
+      cleanDirect();
+      refreshNode(this);
+    });
     return result;
   };
 
   node.__terryNativeBus = {
-    getDirectLinks: () => state.direct.map(cloneLink),
+    getDirectLinks: () => cleanDirect().map(cloneLink),
     setDirectLinks: (links) => {
       state.direct = uniqueLinks(links);
+      cleanDirect();
       refreshNode(node);
       node.graph?.change?.();
     },
@@ -280,8 +319,13 @@ function installReferenceView(node) {
 }
 
 function patchAll() {
+  patchRegisteredH3Targets();
   for (const graph of h3AllGraphs()) {
-    for (const node of graph?._nodes || graph?.nodes || []) installReferenceView(node);
+    for (const node of graph?._nodes || graph?.nodes || []) {
+      installReferenceView(node);
+      const type = h3NodeType(node);
+      if (TARGETS[type]) installTypeGuard(node.constructor, { name: type });
+    }
   }
   patchRegisteredBusSources();
 }
@@ -399,6 +443,7 @@ function start() {
         const signature = h3BusSignature(node);
         if (node.__terryNativeBusSignature !== signature) {
           node.__terryNativeBusSignature = signature;
+          node.__terryNativeBus.getDirectLinks?.();
           refreshNode(node);
         }
       }
@@ -414,24 +459,29 @@ app.registerExtension({
     setTimeout(() => { patchAll(); patchCanvas(); patchGraphToPrompt(); }, 0);
   },
   beforeRegisterNodeDef(nodeType, nodeData) {
-    installTypeGuard(nodeType, nodeData);
+    if (TARGETS[String(nodeData?.name || "")]) {
+      // Defer until all beforeRegisterNodeDef hooks for this class have run, so
+      // the BUS guard wraps H3's own legacy connection/serialization handlers.
+      queueMicrotask(() => installTypeGuard(nodeType, nodeData));
+    }
     if (BUS_SOURCE_TYPES.has(String(nodeData?.name || ""))) {
-      // WireBus installs its normal connection policy in another extension.
-      // Defer our H3/subgraph extension so it wraps the final policy instead
-      // of competing with it.
       queueMicrotask(() => patchBusSourceClass(nodeType));
     }
   },
   nodeCreated(node) {
     queueMicrotask(() => {
       installReferenceView(node);
-      if (BUS_SOURCE_TYPES.has(h3NodeType(node))) patchBusSourceClass(node.constructor);
+      const type = h3NodeType(node);
+      if (TARGETS[type]) installTypeGuard(node.constructor, { name: type });
+      if (BUS_SOURCE_TYPES.has(type)) patchBusSourceClass(node.constructor);
     });
   },
   loadedGraphNode(node) {
     queueMicrotask(() => {
       installReferenceView(node);
-      if (BUS_SOURCE_TYPES.has(h3NodeType(node))) patchBusSourceClass(node.constructor);
+      const type = h3NodeType(node);
+      if (TARGETS[type]) installTypeGuard(node.constructor, { name: type });
+      if (BUS_SOURCE_TYPES.has(type)) patchBusSourceClass(node.constructor);
     });
   },
   afterConfigureGraph() {
