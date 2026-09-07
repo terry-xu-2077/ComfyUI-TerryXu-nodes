@@ -204,10 +204,13 @@ function upstreamWidgetValueFromLink(graph, linkId, seen = new Set()) {
   if (!link) return null;
   const originId = link.origin_id ?? link.originId;
   const originSlot = Number(link.origin_slot ?? link.originSlot ?? 0) || 0;
-  const origin = flexibleNode(graph, originId);
-  if (!origin) return null;
+  const isSubgraphBoundary = Boolean(
+  graph?.inputNode && String(originId) === String(graph.inputNode.id)
+);
+const origin = isSubgraphBoundary ? graph.inputNode : flexibleNode(graph, originId);
+if (!origin) return null;
 
-  if (subgraphInputOrigin(graph, origin)) {
+  if (isSubgraphBoundary || subgraphInputOrigin(graph, origin)) {
     for (const parentGraph of allGraphs()) {
       for (const instance of parentGraph?._nodes || parentGraph?.nodes || []) {
         if (instance?.subgraph !== graph) continue;
@@ -265,6 +268,7 @@ function selectedBool(node) {
     const widget = boolWidget(node);
     if (widget) widget.value = value;
     node.__terryRuntimeBool = value;
+    properties(node)[BOOL_PROPERTY] = value;
     return value;
   }
     if (node.__terryRuntimeBool !== undefined) return Boolean(node.__terryRuntimeBool);
@@ -765,9 +769,9 @@ function installExecutedListener() {
   globalThis.__terryControlExecutedListener = true;
   api.addEventListener?.("executed", (event) => {
     const detail = event?.detail || {};
-    const nodeId = detail.node ?? detail.node_id;
     const output = detail.output || detail;
-    const node = executionNodeById(nodeId);
+    const node = executionNodeById(detail.node ?? detail.node_id)
+      || executionNodeById(detail.display_node);
     if (!node) return;
 
     if (isLine(node)) {
