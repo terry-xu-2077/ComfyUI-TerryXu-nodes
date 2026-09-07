@@ -133,6 +133,12 @@ function setEditorValue(node, text) {
 
 function unwrapPreviewText(output) {
   const candidates = [
+    // ComfyUI official PreviewText payload first. Fresh execution, cache replay
+    // and subgraph display paths all use the standard `text` UI field.
+    output?.text,
+    output?.output?.text,
+    output?.ui?.text,
+    // Legacy fallback for workflows produced by earlier TerryXu builds.
     output?.terry_h3_preview_text,
     output?.output?.terry_h3_preview_text,
     output?.ui?.terry_h3_preview_text,
