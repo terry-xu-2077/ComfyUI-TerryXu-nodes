@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 
 const NODE_ID = "TerryXuH3PromptEditor";
 const SOURCE_INPUT = "source_text";
@@ -32,6 +33,64 @@ function ensureProperties(node) {
   return node.properties;
 }
 
+function allGraphs(root = app.graph?.rootGraph || app.graph) {
+  if (!root) return [];
+  const result = [];
+  const seen = new Set();
+  const queue = [root];
+  while (queue.length) {
+    const graph = queue.shift();
+    if (!graph || seen.has(graph)) continue;
+    seen.add(graph);
+    result.push(graph);
+    for (const node of graph?._nodes || graph?.nodes || []) {
+      if (node?.subgraph && !seen.has(node.subgraph)) queue.push(node.subgraph);
+    }
+    for (const collection of [graph?.subgraphs, graph?._subgraphs]) {
+      if (!collection) continue;
+      const values = typeof collection.values === "function" ? collection.values() : Object.values(collection);
+      for (const value of values) {
+        const subgraph = value?.subgraph || value;
+        if (subgraph && !seen.has(subgraph)) queue.push(subgraph);
+      }
+    }
+  }
+  return result;
+}
+
+function graphNode(graph, id) {
+  if (!graph || id == null) return null;
+  return graph.getNodeById?.(id)
+    || graph.getNodeById?.(String(id))
+    || (Number.isFinite(Number(id)) ? graph.getNodeById?.(Number(id)) : null)
+    || null;
+}
+
+function executionNodeById(nodeId) {
+  const raw = String(nodeId ?? "");
+  if (!raw) return null;
+
+  if (!raw.includes(":")) {
+    const matches = allGraphs().map((graph) => graphNode(graph, raw)).filter(Boolean);
+    if (matches.length === 1) return matches[0];
+    return graphNode(app.graph?.rootGraph || app.graph, raw) || matches[0] || null;
+  }
+
+  const parts = raw.split(":").filter(Boolean);
+  let graph = app.graph?.rootGraph || app.graph;
+  for (let index = 0; graph && index < parts.length - 1; index++) {
+    const instance = graphNode(graph, parts[index]);
+    graph = instance?.subgraph || null;
+  }
+  if (graph && parts.length) {
+    const exact = graphNode(graph, parts[parts.length - 1]);
+    if (exact) return exact;
+  }
+
+  const localId = parts[parts.length - 1];
+  const matches = allGraphs().map((item) => graphNode(item, localId)).filter(Boolean);
+  return matches.length === 1 ? matches[0] : null;
+}
 
 function hasSavedLocalPrompt(node) {
   return Object.prototype.hasOwnProperty.call(node?.properties || {}, LOCAL_PROMPT_PROP);
@@ -58,27 +117,31 @@ function setEditorValue(node, text) {
   const value = String(text ?? "");
   setPromptWidgetValue(node, value);
 
-  // h3_prompt_editor.js exposes its DOM widget. Using its own setValue keeps
-  // every existing formatter, media thumbnail resolver and visual/raw mode in
-  // one code path instead of duplicating H3 rendering here.
+  // h3_prompt_editor.js owns the real rich editor renderer. Reuse its setter so
+  // preview mode never develops a second rendering path.
   const domWidget = node?.__terryH3DomWidget;
   if (typeof domWidget?.setValue === "function") {
     domWidget.setValue(value);
     return;
   }
 
-  // The editor can be created a tick later during graph restore. Keep the
-  // hidden prompt value correct now; the normal H3 editor init will render it.
+  // The editor may be created a tick later during graph restore. Keep the
+  // hidden prompt widget correct now; normal H3 initialization will render it.
   const editor = node?.__terryH3Editor;
   if (editor && !editor.hasChildNodes()) editor.textContent = value;
 }
 
 function unwrapPreviewText(output) {
-  let value = output?.terry_h3_preview_text;
+  const candidates = [
+    output?.terry_h3_preview_text,
+    output?.output?.terry_h3_preview_text,
+    output?.ui?.terry_h3_preview_text,
+  ];
+  let value = candidates.find((item) => item != null);
   if (value == null) return null;
 
-  // ComfyUI UI outputs may arrive as a scalar or as a one-item array depending
-  // on frontend/backend version. Accept both without coercing object metadata.
+  // ComfyUI UI outputs can be scalars or one-item arrays depending on the
+  // backend/frontend path (fresh execution, cache replay, subgraph display).
   while (Array.isArray(value) && value.length === 1) value = value[0];
   if (typeof value === "string") return value;
   if (value == null) return "";
@@ -88,6 +151,21 @@ function unwrapPreviewText(output) {
     if (typeof value.value === "string") return value.value;
   }
   return null;
+}
+
+function applyPreviewOutput(node, output) {
+  if (!isTarget(node) || !sourceConnected(node)) return false;
+  const previewText = unwrapPreviewText(output);
+  if (previewText == null) return false;
+
+  rememberLocalPrompt(node);
+  node.__terryH3ReadOnlyActive = true;
+  node.__terryH3LastPreviewText = previewText;
+  setEditorValue(node, previewText);
+  applyReadOnlyDom(node);
+  node.setDirtyCanvas?.(true, true);
+  node.graph?.setDirtyCanvas?.(true, true);
+  return true;
 }
 
 function applyReadOnlyDom(node) {
@@ -104,9 +182,6 @@ function applyReadOnlyDom(node) {
   editor.title = readonly ? "已连接文本：只读预览" : "";
 
   if (readonly) {
-    // Rich H3 dialogue chips contain their own editable span/select. Rendering
-    // can recreate these descendants, so force every nested editor control into
-    // a genuinely read-only state too.
     editor.querySelectorAll('[contenteditable="true"]').forEach((element) => {
       element.contentEditable = "false";
       element.setAttribute("aria-readonly", "true");
@@ -125,9 +200,6 @@ function installEditorGuard(node, editor) {
   if (!editor || editor.__terryH3ReadOnlyGuard) return;
   editor.__terryH3ReadOnlyGuard = true;
 
-  // Existing H3 tag replacement is bound to pointerdown on chips. Capture it
-  // first while in preview mode so Picture/Video/Audio tags cannot be clicked
-  // to replace media, while ordinary text remains selectable/copyable.
   editor.addEventListener("pointerdown", (event) => {
     if (!sourceConnected(node)) return;
     if (!event.target?.closest?.(".terry-h3-chip")) return;
@@ -135,7 +207,6 @@ function installEditorGuard(node, editor) {
     event.stopImmediatePropagation();
   }, true);
 
-  // Belt-and-suspenders guards for browser editing paths and nested rich chips.
   for (const eventName of ["beforeinput", "paste", "drop", "cut"]) {
     editor.addEventListener(eventName, (event) => {
       if (!sourceConnected(node)) return;
@@ -218,28 +289,28 @@ function patchNodeType(nodeType) {
 
   const oldExecuted = nodeType.prototype.onExecuted;
   nodeType.prototype.onExecuted = function (output) {
-    const connected = sourceConnected(this);
-    let previewText = null;
-
-    if (connected) {
-      rememberLocalPrompt(this);
-      previewText = unwrapPreviewText(output);
-      if (previewText != null) {
-        this.__terryH3LastPreviewText = previewText;
-        // Make the existing H3 execution handler see the external text as its
-        // current raw source, then force one final render after it updates media.
-        setPromptWidgetValue(this, previewText);
-      }
-    }
-
     const result = oldExecuted?.apply(this, arguments);
-
-    if (connected && previewText != null) {
-      setEditorValue(this, previewText);
-    }
+    applyPreviewOutput(this, output);
     syncModeSoon(this);
     return result;
   };
+}
+
+function installExecutedListener() {
+  if (globalThis.__terryH3PreviewExecutedListener) return;
+  globalThis.__terryH3PreviewExecutedListener = true;
+
+  // The stock app also calls node.onExecuted(), but listening to the websocket
+  // event directly makes the preview resilient to extension hook ordering and
+  // covers display_node / flattened subgraph execution IDs explicitly.
+  api.addEventListener?.("executed", (event) => {
+    const detail = event?.detail || {};
+    const node = executionNodeById(detail.node ?? detail.node_id)
+      || executionNodeById(detail.display_node);
+    if (!node || !isTarget(node)) return;
+    applyPreviewOutput(node, detail.output || detail);
+    syncModeSoon(node);
+  });
 }
 
 if (typeof document !== "undefined" && !document.getElementById("terry-h3-readonly-preview-style")) {
@@ -263,6 +334,9 @@ if (typeof document !== "undefined" && !document.getElementById("terry-h3-readon
 
 app.registerExtension({
   name: "TerryXu.H3TextPreviewMode",
+  setup() {
+    installExecutedListener();
+  },
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (String(nodeData?.name || "") !== NODE_ID) return;
     patchNodeType(nodeType);
@@ -274,6 +348,11 @@ app.registerExtension({
     if (isTarget(node)) syncModeSoon(node);
   },
   afterConfigureGraph() {
-    for (const node of app.graph?._nodes || []) if (isTarget(node)) syncModeSoon(node);
+    installExecutedListener();
+    for (const graph of allGraphs()) {
+      for (const node of graph?._nodes || graph?.nodes || []) {
+        if (isTarget(node)) syncModeSoon(node);
+      }
+    }
   },
 });
