@@ -208,6 +208,6 @@ class H3PromptEditor(io.ComfyNode):
             effective_prompt,
             ui={
                 "terry_h3_assets": result,
-                "terry_h3_preview_text": effective_prompt,
+                "text": (effective_prompt,),
             },
         )
