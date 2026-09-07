@@ -1,0 +1,321 @@
+name: TerryXu subgraph bool and H3 run-to-here
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/terryxu-subgraph-bool-h3-run-20260907.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply fixes
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def read(path): return Path(path).read_text(encoding='utf-8')
+          def write(path, text): Path(path).write_text(text, encoding='utf-8')
+          def replace_once(path, old, new):
+              text = read(path)
+              if old not in text:
+                  raise RuntimeError(f'anchor not found in {path}: {old[:120]!r}')
+              write(path, text.replace(old, new, 1))
+
+          # ----- BoolSwitch: keep runtime UI available even when ComfyUI serves cache -----
+          replace_once(
+              'nodes/bool_switch.py',
+              '            inputs=[\n',
+              '            has_intermediate_output=True,\n            inputs=[\n',
+          )
+
+          # ----- H3: it is itself the preview/output endpoint -----
+          h3 = read('nodes/h3_prompt_editor.py')
+          anchor = '            has_intermediate_output=True,\n            inputs=['
+          if anchor not in h3:
+              raise RuntimeError('H3 schema anchor not found')
+          h3 = h3.replace(anchor, '            is_output_node=True,\n            has_intermediate_output=True,\n            inputs=[', 1)
+          sink = h3.find('\n\nclass H3PreviewSink(')
+          if sink >= 0:
+              h3 = h3[:sink].rstrip() + '\n'
+          write('nodes/h3_prompt_editor.py', h3)
+
+          for path in ['nodes/__init__.py', '__init__.py']:
+              text = read(path)
+              text = text.replace('    H3PreviewSink,\n', '')
+              text = text.replace('    "H3PreviewSink",\n', '')
+              write(path, text)
+
+          # ----- H3 frontend: remove the temporary hidden execution sink -----
+          preview_path = 'web/h3_text_preview_mode.js'
+          preview = read(preview_path)
+          preview = preview.replace('const PREVIEW_SINK_TYPE = "TerryXuH3PreviewSink";\n', '')
+          preview = preview.replace('const PREVIEW_SINK_PREFIX = "__terry_h3_preview_sink__";\n', '')
+          preview = re.sub(
+              r'\nfunction patchPreviewExecution\(\) \{.*?\n\}\n\n',
+              '\n', preview, count=1, flags=re.S,
+          )
+          preview = re.sub(
+              r'\n  setup\(\) \{\n    patchPreviewExecution\(\);\n    queueMicrotask\(patchPreviewExecution\);\n    setTimeout\(patchPreviewExecution, 0\);\n  \},',
+              '', preview, count=1,
+          )
+          preview = preview.replace('    patchPreviewExecution();\n', '')
+          write(preview_path, preview)
+
+          # ----- Switch frontend: resolve values through subgraph boundaries -----
+          line_path = 'web/line_switch.js'
+          line = read(line_path)
+          old_upstream = '''function upstreamWidgetValue(node, input) {
+            if (!input || input.link == null || !node?.graph) return null;
+            const link = getLink(node.graph, input.link);
+            if (!link) return null;
+            const origin = getNode(node.graph, link.origin_id ?? link.originId);
+            if (!origin) return null;
+            for (const widget of origin.widgets || []) {
+              if (widget?.value !== undefined) return widget.value;
+            }
+            return null;
+          }
+          '''
+          new_upstream = '''function flexibleNode(graph, id) {
+            if (!graph || id == null) return null;
+            return graph.getNodeById?.(id)
+              || graph.getNodeById?.(String(id))
+              || (Number.isFinite(Number(id)) ? graph.getNodeById?.(Number(id)) : null)
+              || null;
+          }
+
+          function subgraphInputOrigin(graph, node) {
+            if (!graph?.inputNode || !node) return false;
+            return node === graph.inputNode || String(node.id) === String(graph.inputNode.id);
+          }
+
+          function wrapperInputForSubgraph(instance, subgraph, slotIndex) {
+            const slot = subgraph?.inputNode?.slots?.[Number(slotIndex) || 0]
+              || subgraph?.inputs?.[Number(slotIndex) || 0]
+              || null;
+            const inputs = instance?.inputs || [];
+            if (slot) {
+              let index = inputs.findIndex((input) =>
+                input?._subgraphSlot === slot
+                || (
+                  input?._subgraphSlot?.id != null
+                  && slot?.id != null
+                  && String(input._subgraphSlot.id) === String(slot.id)
+                )
+              );
+              if (index < 0 && slot?.name) {
+                index = inputs.findIndex((input) => String(input?.name || "") === String(slot.name));
+              }
+              if (index >= 0) return inputs[index];
+            }
+            return inputs[Number(slotIndex) || 0] || null;
+          }
+
+          function upstreamWidgetValueFromLink(graph, linkId, seen = new Set()) {
+            if (!graph || linkId == null) return null;
+            const key = `${String(graph?.id || "g")}:${String(linkId)}`;
+            if (seen.has(key)) return null;
+            seen.add(key);
+
+            const link = getLink(graph, linkId);
+            if (!link) return null;
+            const originId = link.origin_id ?? link.originId;
+            const originSlot = Number(link.origin_slot ?? link.originSlot ?? 0) || 0;
+            const origin = flexibleNode(graph, originId);
+            if (!origin) return null;
+
+            if (subgraphInputOrigin(graph, origin)) {
+              for (const parentGraph of allGraphs()) {
+                for (const instance of parentGraph?._nodes || parentGraph?.nodes || []) {
+                  if (instance?.subgraph !== graph) continue;
+                  const wrapperInput = wrapperInputForSubgraph(instance, graph, originSlot);
+                  if (!wrapperInput) continue;
+                  if (wrapperInput.link != null) {
+                    const value = upstreamWidgetValueFromLink(instance.graph || parentGraph, wrapperInput.link, seen);
+                    if (value !== null && value !== undefined) return value;
+                  }
+                  const promoted = widgetByName(instance, wrapperInput.name);
+                  if (promoted?.value !== undefined) return promoted.value;
+                }
+              }
+              return null;
+            }
+
+            const type = nodeType(origin).toLowerCase();
+            if ((type === "reroute" || type.endsWith("reroute")) && origin.inputs?.[0]?.link != null) {
+              return upstreamWidgetValueFromLink(origin.graph || graph, origin.inputs[0].link, seen);
+            }
+
+            for (const widget of origin.widgets || []) {
+              if (widget?.value !== undefined) return widget.value;
+            }
+            return null;
+          }
+
+          function upstreamWidgetValue(node, input) {
+            if (!input || input.link == null || !node?.graph) return null;
+            return upstreamWidgetValueFromLink(node.graph, input.link);
+          }
+          '''
+          if old_upstream not in line:
+              raise RuntimeError('upstreamWidgetValue anchor not found')
+          line = line.replace(old_upstream, new_upstream, 1)
+
+          old_index_live = '''    if (Number.isFinite(live)) return clampIndex(live, count);'''
+          new_index_live = '''    if (Number.isFinite(live)) {
+              const next = clampIndex(live, count);
+              const widget = indexWidget(node);
+              if (widget) widget.value = next;
+              node.__terryRuntimeIndex = next;
+              return next;
+            }'''
+          if old_index_live not in line:
+              raise RuntimeError('selectedIndex live anchor not found')
+          line = line.replace(old_index_live, new_index_live, 1)
+
+          old_bool_live = '''    if (live !== null && live !== undefined) return Boolean(live);'''
+          new_bool_live = '''    if (live !== null && live !== undefined) {
+              const value = Boolean(live);
+              const widget = boolWidget(node);
+              if (widget) widget.value = value;
+              node.__terryRuntimeBool = value;
+              return value;
+            }'''
+          if old_bool_live not in line:
+              raise RuntimeError('selectedBool live anchor not found')
+          line = line.replace(old_bool_live, new_bool_live, 1)
+
+          start = line.find('function installExecutedListener() {')
+          end = line.find('\nfunction remoteNodeDef()', start)
+          if start < 0 or end < 0:
+              raise RuntimeError('executed listener block not found')
+          listener = '''function executionNodeById(nodeId) {
+            const raw = String(nodeId ?? "");
+            if (!raw) return null;
+
+            // Ordinary top-level IDs first.
+            for (const graph of allGraphs()) {
+              const direct = flexibleNode(graph, raw);
+              if (direct) return direct;
+            }
+
+            // ComfyUI flattens nested subgraph execution IDs as
+            // instance:instance:localNode. Resolve the exact instance path so
+            // equal local IDs in different subgraphs do not collide.
+            if (raw.includes(":")) {
+              const parts = raw.split(":").filter((part) => part !== "");
+              let graph = app.graph?.rootGraph || app.graph;
+              for (let index = 0; graph && index < parts.length - 1; index++) {
+                const instance = flexibleNode(graph, parts[index]);
+                graph = instance?.subgraph || null;
+              }
+              if (graph && parts.length) {
+                const exact = flexibleNode(graph, parts[parts.length - 1]);
+                if (exact) return exact;
+              }
+
+              // Fallback for frontends that prepend a non-node execution scope.
+              const localId = parts[parts.length - 1];
+              const matches = allGraphs()
+                .map((graph) => flexibleNode(graph, localId))
+                .filter(Boolean);
+              if (matches.length === 1) return matches[0];
+            }
+            return null;
+          }
+
+          function installExecutedListener() {
+            if (globalThis.__terryControlExecutedListener) return;
+            globalThis.__terryControlExecutedListener = true;
+            api.addEventListener?.("executed", (event) => {
+              const detail = event?.detail || {};
+              const nodeId = detail.node ?? detail.node_id;
+              const output = detail.output || detail;
+              const node = executionNodeById(nodeId);
+              if (!node) return;
+
+              if (isLine(node)) {
+                const raw = output?.terry_line_switch_index;
+                const parsed = Number.parseInt(Array.isArray(raw) ? raw[0] : raw, 10);
+                if (Number.isFinite(parsed)) {
+                  const value = clampIndex(parsed, routeValues(node).length);
+                  node.__terryRuntimeIndex = value;
+                  properties(node)[INDEX_PROPERTY] = value;
+                  if (indexInput(node)?.link != null) {
+                    const widget = indexWidget(node);
+                    if (widget) widget.value = value;
+                  }
+                  globalThis.__terrySyncSwitchUI?.(node);
+                  node.graph?.setDirtyCanvas?.(true, true);
+                  refreshAllRemotes();
+                }
+              } else if (isBool(node)) {
+                const raw = output?.terry_bool_switch_state;
+                if (raw !== undefined) {
+                  const value = Boolean(Array.isArray(raw) ? raw[0] : raw);
+                  node.__terryRuntimeBool = value;
+                  properties(node)[BOOL_PROPERTY] = value;
+                  if (boolInput(node)?.link != null) {
+                    const widget = boolWidget(node);
+                    if (widget) widget.value = value;
+                  }
+                  globalThis.__terrySyncSwitchUI?.(node);
+                  node.graph?.setDirtyCanvas?.(true, true);
+                  refreshAllRemotes();
+                }
+              } else if (isBoolean(node)) {
+                const raw = output?.terry_boolean_switch_state;
+                if (raw !== undefined) {
+                  const value = Boolean(Array.isArray(raw) ? raw[0] : raw);
+                  node.__terryRuntimeBool = value;
+                  properties(node)[BOOL_PROPERTY] = value;
+                  globalThis.__terrySyncSwitchUI?.(node);
+                  node.graph?.setDirtyCanvas?.(true, true);
+                  refreshAllRemotes();
+                }
+              }
+            });
+          }
+          '''
+          line = line[:start] + listener + line[end:]
+          write(line_path, line)
+
+          # Remove this one-shot workflow from the final tree.
+          Path('.github/workflows/terryxu-subgraph-bool-h3-run-20260907.yml').unlink(missing_ok=True)
+
+      - name: Validate and commit
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          for p in ['nodes/bool_switch.py','nodes/h3_prompt_editor.py','nodes/__init__.py','__init__.py']:
+              ast.parse(Path(p).read_text(encoding='utf-8'), filename=p)
+          h3 = Path('nodes/h3_prompt_editor.py').read_text(encoding='utf-8')
+          assert 'is_output_node=True' in h3
+          assert 'H3PreviewSink' not in h3
+          assert 'H3PreviewSink' not in Path('__init__.py').read_text(encoding='utf-8')
+          assert 'has_intermediate_output=True' in Path('nodes/bool_switch.py').read_text(encoding='utf-8')
+          preview = Path('web/h3_text_preview_mode.js').read_text(encoding='utf-8')
+          assert 'PREVIEW_SINK' not in preview and 'patchPreviewExecution' not in preview
+          line = Path('web/line_switch.js').read_text(encoding='utf-8')
+          assert 'executionNodeById' in line
+          assert 'wrapperInputForSubgraph' in line
+          PY
+          node --check web/line_switch.js
+          node --check web/h3_text_preview_mode.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Sync subgraph switches and make H3 directly runnable"
+          git push origin main
