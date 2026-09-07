@@ -26,22 +26,29 @@ function getWidget(node, name) {
   return node?.widgets?.find((w) => w?.name === name) || null;
 }
 
-function setWidgetOption(widget, key, value) {
-  if (!widget) return;
-  widget.options ||= {};
-  widget.options[key] = value;
-  if (widget._state?.options) widget._state.options[key] = value;
-}
-
 function hidePromptWidget(widget) {
   if (!widget) return;
-  widget.hidden = true;
-  widget.type = "hidden";
-  setWidgetOption(widget, "hidden", true);
-  setWidgetOption(widget, "canvasOnly", true);
+
+  // Keep the original multiline STRING widget canonical and promotable.
+  // ComfyUI subgraph promotion resolves a widget back to its input slot and
+  // copies the widget type/options to the SubgraphNode. Turning this widget
+  // into type="hidden" therefore makes official promotion impossible.
+  // We only hide its source textarea/layout on the H3 node; the widget remains
+  // a normal customtext widget for promotion, serialization and instance state.
+  widget.hidden = false;
+  if (widget.type === "hidden") widget.type = "customtext";
+  if (widget.options) {
+    delete widget.options.hidden;
+    delete widget.options.canvasOnly;
+  }
+  if (widget._state?.options) {
+    delete widget._state.options.hidden;
+    delete widget._state.options.canvasOnly;
+  }
   widget.computeSize = () => [0, -4];
   if (widget.element?.style) widget.element.style.display = "none";
   if (widget.inputEl?.style) widget.inputEl.style.display = "none";
+  widget.__terryH3CanonicalPromptWidget = true;
 }
 
 function ensureLinks(node) {
@@ -137,6 +144,21 @@ function getMediaInputIndex(node) {
   return node?.inputs?.findIndex((x) => String(x?.name || "") === "media") ?? -1;
 }
 
+function isSubgraphInputBoundaryNode(node) {
+  if (!node) return false;
+  try {
+    if (node?.isSubgraphInputNode?.()) return true;
+  } catch {}
+  const type = String(
+    node?.comfyClass ||
+      node?.type ||
+      node?.constructor?.type ||
+      node?.constructor?.name ||
+      ""
+  ).toLowerCase();
+  return type.includes("subgraphinput") || type.includes("subgraph input");
+}
+
 function ensureSingleMediaInput(node) {
   if (!node) return;
   node.inputs ||= [];
@@ -174,6 +196,13 @@ function convertNativeMediaConnection(node, inputIndex, info = null) {
   if (!src) return false;
   const rawSlot = native.origin_slot ?? native.originSlot ?? native.from_slot ?? native.fromSlot ?? 0;
   const slot = Number(rawSlot) || 0;
+  const nativeType = String(native.type || src.outputs?.[slot]?.type || "").toUpperCase();
+
+  // BUS and SubgraphInput links are structural links, not legacy direct-media
+  // references. They must remain physical so ComfyUI can preserve them while
+  // converting/repacking subgraphs and the BUS resolver can cross boundaries.
+  if (nativeType === "TERRY_WIRE_BUS" || isSubgraphInputBoundaryNode(src)) return false;
+
   const added = addVirtualLink(node, src, slot, native.type || src.outputs?.[slot]?.type || "*");
   node.__terryClearingLink = true;
   try {
@@ -283,7 +312,7 @@ function previewFromSource(node, kind) {
   const filename = filenameFromSource(node, kind);
   if (filename) {
     const w = (node.widgets || []).find((x) => {
-      const v = x?.value;
+      const v = w?.value;
       return String(typeof v === "object" ? (v?.filename || v?.name || "") : (v || "")) === filename;
     });
     const v = w?.value;
@@ -547,6 +576,21 @@ function installStyle() {
 function installNode(nodeType, nodeData) {
   if (nodeData?.name !== NODE_ID || nodeType.prototype.__terryH3Installed) return;
   nodeType.prototype.__terryH3Installed = true;
+
+  // The visible rich editor is an auxiliary DOM widget, but semantically it is
+  // the prompt widget. Let ComfyUI's official promotion lookup resolve it back
+  // to the canonical prompt input when users right-click the rich editor.
+  const getSlotFromWidget = nodeType.prototype.getSlotFromWidget;
+  nodeType.prototype.getSlotFromWidget = function(widget) {
+    if (widget && widget === this.__terryH3DomWidget) {
+      const promptWidget = getWidget(this, "prompt");
+      const slot = getSlotFromWidget?.call(this, promptWidget)
+        || (this.inputs || []).find((input) => String(input?.widget?.name || "") === "prompt");
+      if (slot) return slot;
+    }
+    return getSlotFromWidget?.apply(this, arguments);
+  };
+
   const created = nodeType.prototype.onNodeCreated;
   nodeType.prototype.onNodeCreated = function() {
     const r = created?.apply(this, arguments);
