@@ -3,6 +3,7 @@ import { api } from "../../scripts/api.js";
 
 const LINE_TYPE = "TerryXuLineSwitch";
 const BOOL_TYPE = "TerryXuBoolSwitch";
+const BOOLEAN_TYPE = "TerryXuBooleanSwitch";
 const REMOTE_TYPE = "TerryXuRemoteControl";
 const MAX_ROUTES = 64;
 const ACTIVE_COLOR = "#ffd45a";
@@ -37,10 +38,12 @@ function text() {
     ? {
         lineTitle: "*️⃣ 多线切换器",
         boolTitle: "🔀 二路切换器",
+        booleanTitle: "🔘 布尔开关",
         remoteTitle: "🎛️ 远程控制器",
         index: "线路",
         route: "线路",
         bool: "切换",
+        boolean: "开关",
         falseInput: "线路 1",
         trueInput: "线路 2",
         output: "输出",
@@ -48,15 +51,18 @@ function text() {
         control: "控制",
         lineChannel: "线路切换",
         boolChannel: "二路切换",
+        booleanChannel: "布尔开关",
         remoteDescription: "按名称自动匹配可控节点，并生成对应的远程控制界面。",
       }
     : {
         lineTitle: "*️⃣ Multi-Line Switch",
         boolTitle: "🔀 Two-Way Switch",
+        booleanTitle: "🔘 Boolean Switch",
         remoteTitle: "🎛️ Remote Control",
         index: "Route",
         route: "Route",
         bool: "Switch",
+        boolean: "Switch",
         falseInput: "Input 1",
         trueInput: "Input 2",
         output: "Output",
@@ -64,6 +70,7 @@ function text() {
         control: "Control",
         lineChannel: "Line Switch",
         boolChannel: "Two-Way Switch",
+        booleanChannel: "Boolean Switch",
         remoteDescription: "Match controllable nodes by name and build the corresponding remote control UI.",
       };
 }
@@ -74,7 +81,8 @@ function nodeType(node) {
 
 function isLine(node) { return nodeType(node) === LINE_TYPE; }
 function isBool(node) { return nodeType(node) === BOOL_TYPE; }
-function isControllable(node) { return isLine(node) || isBool(node); }
+function isBoolean(node) { return nodeType(node) === BOOLEAN_TYPE; }
+function isControllable(node) { return isLine(node) || isBool(node) || isBoolean(node); }
 function isRemote(node) { return nodeType(node) === REMOTE_TYPE; }
 
 function allGraphs(root = app.graph) {
@@ -198,13 +206,17 @@ function setControlChannel(node, value) {
   properties(node)[CHANNEL_PROPERTY] = next;
   const widget = widgetByName(node, CHANNEL_WIDGET);
   if (widget && widget.value !== next) widget.value = next;
+  if (isBoolean(node)) {
+    const output = node.outputs?.[0];
+    if (output) output.label = next || text().output;
+  }
   refreshAllRemotes();
   node.graph?.setDirtyCanvas?.(true, true);
 }
 
 function uniqueDefaultChannel(node) {
   const labels = text();
-  const base = isBool(node) ? labels.boolChannel : labels.lineChannel;
+  const base = isBoolean(node) ? labels.booleanChannel : (isBool(node) ? labels.boolChannel : labels.lineChannel);
   const names = new Set(graphNodes().filter((item) => item !== node).map(controlChannel).filter(Boolean));
   if (!names.has(base)) return base;
   let suffix = 2;
@@ -266,9 +278,6 @@ function bindTargetWidgetSync(node, widget, kind) {
       properties(node)[BOOL_PROPERTY] = next;
       node.__terryRuntimeBool = next;
     }
-    // Nodes 2.0 can update a widget without going through node.onWidgetChanged.
-    // Treat the target widget callback as the direct-change event and refresh
-    // every remote from the target, which remains the single source of truth.
     queueMicrotask(() => {
       globalThis.__terrySyncSwitchUI?.(node);
       refreshAllRemotes();
@@ -306,9 +315,30 @@ function refreshBool(node) {
   node.graph?.setDirtyCanvas?.(true, true);
 }
 
+function refreshBoolean(node) {
+  if (!isBoolean(node)) return;
+  const labels = text();
+  node.title = labels.booleanTitle;
+  node.resizable = false;
+  node.serialize_widgets = true;
+  if (properties(node)[BOOL_PROPERTY] == null) properties(node)[BOOL_PROPERTY] = false;
+  ensureChannelWidget(node);
+  const widget = boolWidget(node);
+  if (widget) {
+    bindTargetWidgetSync(node, widget, "bool");
+    widget.label = labels.boolean;
+  }
+  const channel = widgetByName(node, CHANNEL_WIDGET);
+  if (channel) channel.label = labels.channel;
+  const output = node.outputs?.[0];
+  if (output) output.label = controlChannel(node) || labels.output;
+  node.graph?.setDirtyCanvas?.(true, true);
+}
+
 function refreshControllable(node) {
   if (isLine(node)) refreshLine(node);
   else if (isBool(node)) refreshBool(node);
+  else if (isBoolean(node)) refreshBoolean(node);
   refreshAllRemotes();
 }
 
@@ -340,6 +370,22 @@ registerControlAdapter(BOOL_TYPE, {
   },
   set(node, value) {
     if (boolInput(node)?.link != null) return false;
+    const next = Boolean(value);
+    const widget = boolWidget(node);
+    if (widget) widget.value = next;
+    properties(node)[BOOL_PROPERTY] = next;
+    node.__terryRuntimeBool = next;
+    node.onWidgetChanged?.("enabled", next, widget, widget);
+    node.graph?.setDirtyCanvas?.(true, true);
+    return true;
+  },
+});
+
+registerControlAdapter(BOOLEAN_TYPE, {
+  describe(node) {
+    return { kind: "toggle", label: text().boolean, value: selectedBool(node) };
+  },
+  set(node, value) {
     const next = Boolean(value);
     const widget = boolWidget(node);
     if (widget) widget.value = next;
@@ -412,8 +458,6 @@ function rebuildRemoteValueWidget(node, description, force = false) {
     const adapter = target && controlAdapters.get(nodeType(target));
     if (!target || !adapter) return;
     if (adapter.set(target, value) !== false) {
-      // The controlled node is the single source of truth. Any successful
-      // remote write is followed by a read-back and a refresh of every remote.
       const actual = adapter.describe?.(target)?.value ?? value;
       properties(node)[REMOTE_VALUE_PROPERTY] = actual;
       refreshAllRemotes();
@@ -628,6 +672,15 @@ function installExecutedListener() {
           node.graph?.setDirtyCanvas?.(true, true);
           refreshAllRemotes();
         }
+      } else if (isBoolean(node)) {
+        const raw = output?.terry_boolean_switch_state;
+        if (raw !== undefined) {
+          const value = Boolean(Array.isArray(raw) ? raw[0] : raw);
+          node.__terryRuntimeBool = value;
+          properties(node)[BOOL_PROPERTY] = value;
+          node.graph?.setDirtyCanvas?.(true, true);
+          refreshAllRemotes();
+        }
       }
       break;
     }
@@ -678,7 +731,7 @@ function patchControllableNodeType(nodeTypeClass, nodeData) {
     if (nodeData?.name === LINE_TYPE && name === "index") {
       properties(this)[INDEX_PROPERTY] = Number.parseInt(value, 10) || 1;
       queueMicrotask(refreshAllRemotes);
-    } else if (nodeData?.name === BOOL_TYPE && name === "enabled") {
+    } else if ([BOOL_TYPE, BOOLEAN_TYPE].includes(nodeData?.name) && name === "enabled") {
       properties(this)[BOOL_PROPERTY] = Boolean(value);
       queueMicrotask(refreshAllRemotes);
     } else if (name === CHANNEL_WIDGET) {
@@ -697,7 +750,7 @@ app.registerExtension({
   },
 
   beforeRegisterNodeDef(nodeTypeClass, nodeData) {
-    if ([LINE_TYPE, BOOL_TYPE].includes(nodeData?.name)) patchControllableNodeType(nodeTypeClass, nodeData);
+    if ([LINE_TYPE, BOOL_TYPE, BOOLEAN_TYPE].includes(nodeData?.name)) patchControllableNodeType(nodeTypeClass, nodeData);
 
     if (nodeData?.name === REMOTE_TYPE) {
       const originalCreated = nodeTypeClass.prototype.onNodeCreated;
