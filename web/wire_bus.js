@@ -7,20 +7,34 @@ const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
 const WIRELESS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
 const BUS_TYPE = "TERRY_WIRE_BUS";
 const EMPTY_TYPE = "*";
+
 const PACK_LANES_PROPERTY = "terry_wire_bus_lanes";
 const UNPACK_LANES_PROPERTY = "terry_wire_bus_lane_ids";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
+const UNPACK_OUTPUT_MODE_PROPERTY = "terry_wire_bus_expand_outputs";
+
 const LANE_FIELD = "terry_lane_id";
+const BUS_OUTPUT_FIELD = "terry_bus_passthrough_output";
+
 const COMPACT_NODE_WIDTH = 112;
 const COMPACT_NODE_MIN_HEIGHT = 96;
 const COMPACT_NODE_HEADER_HEIGHT = 32;
 const COMPACT_NODE_LANE_HEIGHT = 20;
 const COMPACT_NODE_SLOT_PADDING = 20;
+
 const WIRELESS_WIDGET_HEIGHT = 38;
 const WIRELESS_CONTROL_HEIGHT = 26;
 const WIRELESS_CONTROL_MARGIN = 6;
 const WIRELESS_CONTROL_BOTTOM_PADDING = 8;
 const WIRELESS_CONTROL_STYLE_ID = "terry-wireless-bus-control-style";
+
+const OUTPUT_MODE_CONTROL_HEIGHT = 30;
+const OUTPUT_MODE_CONTROL_MARGIN = 4;
+const OUTPUT_MODE_STYLE_ID = "terry-wire-bus-output-mode-style";
+const BUS_ONLY_WIRED_HEIGHT = 110;
+const BUS_ONLY_WIRELESS_HEIGHT = 140;
+
+const H3_TYPES = new Set(["TerryXuH3PromptEditor", "TerryXuH3ShotTimeline"]);
 
 let laneSequence = 0;
 
@@ -65,6 +79,7 @@ function labels() {
       defaultChannel: "总线",
       input: "输入",
       output: "输出",
+      expandOutputs: "散开输出",
     };
   }
   return {
@@ -84,6 +99,7 @@ function labels() {
     defaultChannel: "Bus",
     input: "Input",
     output: "Output",
+    expandOutputs: "Expand outputs",
   };
 }
 
@@ -100,12 +116,38 @@ function isWirelessUnpack(node) { return nodeType(node) === WIRELESS_UNPACK_TYPE
 function isWireless(node) { return isWirelessPack(node) || isWirelessUnpack(node); }
 function isPack(node) { return isWiredPack(node) || isWirelessPack(node); }
 function isUnpack(node) { return isWiredUnpack(node) || isWirelessUnpack(node); }
+
 function isReroute(node) {
   const type = nodeType(node).toLowerCase();
   return type === "reroute" || type.endsWith("reroute");
 }
+
 function isGet(node) { return nodeType(node) === "GetNode"; }
 function isSet(node) { return nodeType(node) === "SetNode"; }
+
+function nodeProperties(node) {
+  if (!node.properties || typeof node.properties !== "object") node.properties = {};
+  return node.properties;
+}
+
+function unpackExpanded(node) {
+  return nodeProperties(node)[UNPACK_OUTPUT_MODE_PROPERTY] !== false;
+}
+
+function isH3MediaTarget(node, input) {
+  if (!H3_TYPES.has(nodeType(node))) return false;
+  if (String(input?.name || "") === "media") return true;
+  return Boolean(node?.inputs?.some?.((slot) => String(slot?.name || "") === "media"));
+}
+
+function canConnectBusOutput(targetNode, input) {
+  return (
+    isUnpack(targetNode)
+    || isReroute(targetNode)
+    || isSet(targetNode)
+    || isH3MediaTarget(targetNode, input)
+  );
+}
 
 function getLink(graph, linkId) {
   if (!graph || linkId == null) return null;
@@ -473,6 +515,157 @@ function initializeWirelessWidget(node) {
   initializeWirelessControl(node);
 }
 
+function installOutputModeStyle() {
+  if (typeof document === "undefined" || document.getElementById(OUTPUT_MODE_STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = OUTPUT_MODE_STYLE_ID;
+  style.textContent = `
+.terry-bus-output-mode-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  width:100%;
+  height:26px;
+  min-height:26px;
+  box-sizing:border-box;
+  padding:0 2px 0 6px;
+  color:rgba(238,238,238,.9);
+  font:11px/1.2 Inter,system-ui,sans-serif;
+  user-select:none;
+  pointer-events:auto;
+}
+.terry-bus-output-mode-label{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.terry-bus-output-mode-switch{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  flex:0 0 auto;
+  width:30px;
+  height:18px;
+  margin-left:8px;
+  padding:0;
+  border:0;
+  border-radius:999px;
+  background:rgba(255,255,255,.16);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);
+  cursor:pointer;
+  outline:none;
+  transition:background .12s ease, box-shadow .12s ease;
+}
+.terry-bus-output-mode-switch[data-checked="true"]{
+  background:var(--p-primary-color,#60a5fa);
+}
+.terry-bus-output-mode-switch:focus-visible{
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--p-primary-color,#60a5fa) 45%,transparent);
+}
+.terry-bus-output-mode-thumb{
+  position:absolute;
+  left:2px;
+  top:2px;
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  background:#f5f5f5;
+  box-shadow:0 1px 2px rgba(0,0,0,.35);
+  transform:translateX(0);
+  transition:transform .12s ease;
+}
+.terry-bus-output-mode-switch[data-checked="true"] .terry-bus-output-mode-thumb{
+  transform:translateX(12px);
+}
+`;
+  document.head.append(style);
+}
+
+function refreshOutputModeControl(node) {
+  const ui = node?.__terryBusOutputModeControl;
+  if (!ui) return;
+  const value = unpackExpanded(node);
+  ui.label.textContent = labels().expandOutputs;
+  ui.button.dataset.checked = String(value);
+  ui.button.setAttribute("aria-checked", String(value));
+}
+
+function setUnpackExpanded(node, value, notify = true) {
+  if (!isUnpack(node)) return;
+  const next = Boolean(value);
+  const properties = nodeProperties(node);
+  if (properties[UNPACK_OUTPUT_MODE_PROPERTY] === next) {
+    refreshOutputModeControl(node);
+    return;
+  }
+  properties[UNPACK_OUTPUT_MODE_PROPERTY] = next;
+  node.__terryBusSignature = null;
+  refreshOutputModeControl(node);
+  syncUnpack(node, true);
+  node.__terryBusRefreshVisual?.();
+  node.graph?.setDirtyCanvas?.(true, true);
+  if (notify) node.graph?.change?.();
+}
+
+function initializeUnpackOutputModeControl(node) {
+  if (!isUnpack(node) || node.__terryBusOutputModeControl) return;
+  if (typeof document === "undefined" || typeof node.addDOMWidget !== "function") return;
+  const properties = nodeProperties(node);
+  if (properties[UNPACK_OUTPUT_MODE_PROPERTY] == null) properties[UNPACK_OUTPUT_MODE_PROPERTY] = true;
+
+  installOutputModeStyle();
+
+  const row = document.createElement("div");
+  row.className = "terry-bus-output-mode-row";
+
+  const label = document.createElement("span");
+  label.className = "terry-bus-output-mode-label";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "terry-bus-output-mode-switch p-toggleswitch p-component";
+  button.setAttribute("role", "switch");
+
+  const thumb = document.createElement("span");
+  thumb.className = "terry-bus-output-mode-thumb";
+  button.append(thumb);
+  row.append(label, button);
+
+  row.addEventListener("pointerdown", (event) => event.stopPropagation());
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setUnpackExpanded(node, !unpackExpanded(node));
+  });
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== " " && event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+    setUnpackExpanded(node, !unpackExpanded(node));
+  });
+
+  const widget = node.addDOMWidget(
+    "terry_bus_expand_outputs_native",
+    "terry_bus_expand_outputs_native",
+    row,
+    {
+      serialize: false,
+      hideOnZoom: false,
+      margin: OUTPUT_MODE_CONTROL_MARGIN,
+      getMinHeight: () => OUTPUT_MODE_CONTROL_HEIGHT,
+      getMaxHeight: () => OUTPUT_MODE_CONTROL_HEIGHT,
+    }
+  );
+  if (!widget) {
+    row.remove?.();
+    return;
+  }
+  widget.serialize = false;
+  node.__terryBusOutputModeControl = { widget, row, label, button, thumb };
+  refreshOutputModeControl(node);
+}
+
 function variableName(node) {
   return node?.widgets?.[0]?.value ?? node?.properties?.name ?? null;
 }
@@ -532,8 +725,24 @@ function resolveUpstream(graph, linkId, seen = new Set()) {
 
   if (isUnpack(node)) {
     const pack = findPackFromUnpack(node);
-    const entries = pack ? effectivePackLaneEntries(pack) : [];
-    if (pack) ensureUnpackLaneIds(node, entries.map((entry) => entry.lane));
+    if (!pack) return null;
+
+    if (
+      !unpackExpanded(node)
+      && String(node.outputs?.[slot]?.type || "").toUpperCase() === BUS_TYPE
+    ) {
+      return {
+        node: pack,
+        graph: pack.graph,
+        nodeId: pack.id,
+        slot: 0,
+        type: BUS_TYPE,
+        name: labels().bus,
+      };
+    }
+
+    const entries = effectivePackLaneEntries(pack);
+    ensureUnpackLaneIds(node, entries.map((entry) => entry.lane));
     const laneId = node.outputs?.[slot]?.[LANE_FIELD];
     const entry = laneId ? entries.find((item) => item.laneId === laneId) : null;
     const input = entry?.input;
@@ -579,6 +788,7 @@ function findPackFromUnpack(unpack) {
     if (unpack?.graph && linkId != null) {
       const upstream = resolveUpstream(unpack.graph, linkId);
       if (upstream && isWirelessPack(upstream.node)) return upstream.node;
+      if (upstream && isWiredPack(upstream.node)) return upstream.node;
     }
     const name = wirelessChannelName(unpack);
     if (!name) return null;
@@ -589,12 +799,7 @@ function findPackFromUnpack(unpack) {
   const linkId = unpack?.inputs?.[0]?.link;
   if (!unpack?.graph || linkId == null) return null;
   const upstream = resolveUpstream(unpack.graph, linkId);
-  return upstream && isWiredPack(upstream.node) ? upstream.node : null;
-}
-
-function nodeProperties(node) {
-  if (!node.properties || typeof node.properties !== "object") node.properties = {};
-  return node.properties;
+  return upstream && isPack(upstream.node) ? upstream.node : null;
 }
 
 function storedPackLanes(pack) {
@@ -688,6 +893,7 @@ function ensureUnpackLaneIds(unpack, lanes) {
   const ids = [];
   for (let index = 0; index < (unpack.outputs?.length || 0); index++) {
     const output = unpack.outputs[index];
+    if (output?.[BUS_OUTPUT_FIELD]) continue;
     const id = String(output?.[LANE_FIELD] || stored[index] || lanes[index]?.id || "").trim();
     if (!id) continue;
     output[LANE_FIELD] = id;
@@ -700,6 +906,7 @@ function ensureUnpackLaneIds(unpack, lanes) {
 function laneHasOutputLinks(pack, laneId) {
   const lanes = ensurePackLanes(pack);
   for (const unpack of connectedUnpacksForPack(pack)) {
+    if (!unpackExpanded(unpack)) continue;
     ensureUnpackLaneIds(unpack, lanes);
     const output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === laneId);
     if ((output?.links?.length || 0) > 0) return true;
@@ -776,6 +983,13 @@ function disconnectAllOutputLinks(node, outputIndex) {
   }
 }
 
+function removeAllOutputs(node) {
+  for (let index = (node.outputs?.length || 0) - 1; index >= 0; index--) {
+    disconnectAllOutputLinks(node, index);
+    node.removeOutput?.(index);
+  }
+}
+
 function syncConnectionType(graph, linkId, type) {
   const link = getLink(graph, linkId);
   const nextType = String(type || EMPTY_TYPE).trim() || EMPTY_TYPE;
@@ -811,6 +1025,10 @@ function localizeFixedPorts(node, updateTitle = false) {
   } else if (isWiredUnpack(node)) {
     const input = node.inputs?.[0];
     if (input) { input.name = "bus"; input.label = text.bus; input.type = BUS_TYPE; }
+    if (!unpackExpanded(node)) {
+      const out = node.outputs?.[0];
+      if (out) { out.name = "bus"; out.label = text.bus; out.type = BUS_TYPE; }
+    }
     if (updateTitle) node.title = text.unpackTitle;
   } else if (isWirelessPack(node)) {
     const out = node.outputs?.[0];
@@ -821,10 +1039,15 @@ function localizeFixedPorts(node, updateTitle = false) {
   } else if (isWirelessUnpack(node)) {
     const input = node.inputs?.[0];
     if (input) { input.name = "bus"; input.label = text.bus; input.type = BUS_TYPE; }
+    if (!unpackExpanded(node)) {
+      const out = node.outputs?.[0];
+      if (out) { out.name = "bus"; out.label = text.bus; out.type = BUS_TYPE; }
+    }
     const widget = wirelessChannelWidget(node);
     if (widget) widget.name = text.channelSelect;
     if (updateTitle) node.title = text.wirelessUnpackTitle;
   }
+  if (isUnpack(node)) refreshOutputModeControl(node);
 }
 
 function emptyLaneLabel(name, index) {
@@ -839,42 +1062,71 @@ function compactBusNodeHeight(laneCount) {
   );
 }
 
+function controlBlockHeight(node) {
+  if (isWirelessUnpack(node)) return 40 + OUTPUT_MODE_CONTROL_HEIGHT;
+  if (isWirelessPack(node)) return 40;
+  if (isWiredUnpack(node)) return OUTPUT_MODE_CONTROL_HEIGHT;
+  return 0;
+}
+
 function compactBusNodeMinimumHeight(node, laneCount) {
+  if (isUnpack(node) && !unpackExpanded(node)) {
+    return isWirelessUnpack(node) ? BUS_ONLY_WIRELESS_HEIGHT : BUS_ONLY_WIRED_HEIGHT;
+  }
   const slotHeight = Math.max(16, Number(globalThis.LiteGraph?.NODE_SLOT_HEIGHT) || 20);
   const visibleSlots = Math.max(1, Number(laneCount) || 0) + (isPack(node) ? 1 : 0);
-  return COMPACT_NODE_SLOT_PADDING + visibleSlots * slotHeight
-    + (isWireless(node) ? WIRELESS_WIDGET_HEIGHT : 0);
+  return COMPACT_NODE_SLOT_PADDING + visibleSlots * slotHeight + controlBlockHeight(node);
 }
 
 function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   if (!node) return;
-  const minHeight = compactBusNodeMinimumHeight(node, laneCount);
-  const preferredHeight = Math.max(
-    minHeight,
-    compactBusNodeHeight(laneCount) + (isWireless(node) ? WIRELESS_WIDGET_HEIGHT : 0)
-  );
+
+  const busOnly = isUnpack(node) && !unpackExpanded(node);
+  const fixedBusOnlyHeight = busOnly
+    ? (isWirelessUnpack(node) ? BUS_ONLY_WIRELESS_HEIGHT : BUS_ONLY_WIRED_HEIGHT)
+    : 0;
+
+  const minHeight = busOnly
+    ? fixedBusOnlyHeight
+    : compactBusNodeMinimumHeight(node, laneCount);
+
+  const preferredHeight = busOnly
+    ? fixedBusOnlyHeight
+    : Math.max(
+        minHeight,
+        compactBusNodeHeight(laneCount) + controlBlockHeight(node)
+      );
+
   const initialized = node.__terryBusLayoutInitialized === true;
   const currentWidth = Number(node.size?.[0]) || COMPACT_NODE_WIDTH;
   const currentHeight = Number(node.size?.[1]) || preferredHeight;
   const previousPreferredHeight = Number(node.__terryBusPreferredHeight) || preferredHeight;
   const customHeight = initialized && Math.abs(currentHeight - previousPreferredHeight) > 0.5;
   const width = initialized ? Math.max(COMPACT_NODE_WIDTH, currentWidth) : COMPACT_NODE_WIDTH;
-  const inheritsPairedHeight = (isUnpack(node) && isPack(pairedPack))
-    || (isWirelessPack(node) && isWiredPack(pairedPack));
-  const pairedHeight = inheritsPairedHeight
-    ? Number(pairedPack.size?.[1]) || 0
-    : 0;
-  const height = pairedHeight || (customHeight ? Math.max(minHeight, currentHeight) : preferredHeight);
+
+  const inheritsPairedHeight = !busOnly && (
+    (isUnpack(node) && isPack(pairedPack))
+    || (isWirelessPack(node) && isWiredPack(pairedPack))
+  );
+
+  let pairedHeight = 0;
+  if (inheritsPairedHeight) {
+    pairedHeight = Number(pairedPack.size?.[1]) || 0;
+    if (isUnpack(node)) pairedHeight += OUTPUT_MODE_CONTROL_HEIGHT;
+  }
+
+  const height = busOnly
+    ? fixedBusOnlyHeight
+    : (pairedHeight || (customHeight ? Math.max(minHeight, currentHeight) : preferredHeight));
+
   node.__terryBusCompactWidth = COMPACT_NODE_WIDTH;
   node.__terryBusMinHeight = pairedHeight ? Math.min(minHeight, pairedHeight) : minHeight;
   node.__terryBusPreferredHeight = pairedHeight || preferredHeight;
   node.__terryBusLayoutInitialized = true;
-  if (isWireless(node)) {
-    node.widgets_start_y = height
-      - WIRELESS_CONTROL_HEIGHT
-      - WIRELESS_CONTROL_BOTTOM_PADDING
-      - WIRELESS_CONTROL_MARGIN;
-  }
+
+  const blockHeight = controlBlockHeight(node);
+  if (blockHeight > 0) node.widgets_start_y = Math.max(0, height - blockHeight);
+
   if (!node.flags?.collapsed) node.__terryBusExpandedSize = [width, height];
   node.setSize?.([width, height]);
 }
@@ -899,63 +1151,126 @@ function syncWirelessBridgePackHeight(pack, publishedEntries = null) {
   pack.__terryBusRefreshVisual?.();
 }
 
-function syncUnpack(unpack, force = false) {
-  localizeFixedPorts(unpack);
-  if (isWirelessUnpack(unpack)) unpack.__terryWirelessControl?.refresh?.();
-  const pack = findPackFromUnpack(unpack);
-  const entries = pack ? effectivePackLaneEntries(pack) : [];
-  syncWirelessBridgePackHeight(pack, entries);
-  const signature = signatureForEntries(entries);
-  const matchingPackHeight = !pack || Math.abs(
-    Number(unpack.size?.[1] || 0) - Number(pack.size?.[1] || 0)
-  ) <= 0.5;
-  if (!force && unpack.__terryBusSignature === signature && matchingPackHeight) return;
-  unpack.__terryBusSignature = signature;
+function ensureUnpackBusOutput(unpack) {
+  const outputs = unpack.outputs || [];
+  const current = outputs[0];
+  const alreadyBusOnly = outputs.length === 1
+    && String(current?.type || "").toUpperCase() === BUS_TYPE
+    && current?.[BUS_OUTPUT_FIELD] === true;
 
-  ensureUnpackLaneIds(unpack, entries.map((entry) => entry.lane));
-  const desiredIds = new Set(entries.map((entry) => entry.laneId));
-
-  // Delete only lanes that disappeared on the pack side. Never rebuild all outputs:
-  // LiteGraph keeps the later output links attached while it shifts their slot indices.
-  for (let index = (unpack.outputs?.length || 0) - 1; index >= 0; index--) {
-    const output = unpack.outputs[index];
-    if (desiredIds.has(output?.[LANE_FIELD])) continue;
-    disconnectAllOutputLinks(unpack, index);
-    unpack.removeOutput?.(index);
-  }
-
-  for (const entry of entries) {
-    let output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
-    if (!output) {
-      const previousLength = unpack.outputs?.length || 0;
-      const added = unpack.addOutput?.(entry.name || labels().output, entry.type || EMPTY_TYPE);
-      output = unpack.outputs?.[previousLength] || added;
-      if (output) output[LANE_FIELD] = entry.laneId;
-    }
-  }
-
-  for (let index = 0; index < entries.length; index++) {
-    const entry = entries[index];
-    const output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
-    if (!output) continue;
-    output.type = entry.type || EMPTY_TYPE;
-    if (output.type === BUS_TYPE) {
+  if (!alreadyBusOnly) {
+    removeAllOutputs(unpack);
+    const added = unpack.addOutput?.("bus", BUS_TYPE);
+    const output = unpack.outputs?.[0] || added;
+    if (output) {
       output.name = "bus";
       output.label = labels().bus;
-    } else {
-      output.name = entry.source ? entry.name : emptyLaneLabel(entry.name, index);
-      output.label = output.name;
+      output.type = BUS_TYPE;
+      output[BUS_OUTPUT_FIELD] = true;
+      delete output[LANE_FIELD];
     }
-    for (const linkId of output.links || []) syncConnectionType(unpack.graph, linkId, output.type);
+  } else {
+    current.name = "bus";
+    current.label = labels().bus;
+    current.type = BUS_TYPE;
   }
 
-  nodeProperties(unpack)[UNPACK_LANES_PROPERTY] = (unpack.outputs || []).map(
-    (output) => output?.[LANE_FIELD] || ""
-  );
+  nodeProperties(unpack)[UNPACK_LANES_PROPERTY] = [];
+}
 
-  resizeCompactBusNode(unpack, entries.length, pack);
-  unpack.__terryBusRefreshVisual?.();
-  unpack.graph?.setDirtyCanvas?.(true, true);
+function clearBusOnlyOutputForExpanded(unpack) {
+  if (!(unpack.outputs || []).some((output) => output?.[BUS_OUTPUT_FIELD] === true)) return;
+  removeAllOutputs(unpack);
+  nodeProperties(unpack)[UNPACK_LANES_PROPERTY] = [];
+}
+
+function syncUnpack(unpack, force = false) {
+  if (!isUnpack(unpack) || unpack.__terryBusSyncing) return;
+  unpack.__terryBusSyncing = true;
+  try {
+    localizeFixedPorts(unpack);
+    initializeUnpackOutputModeControl(unpack);
+    refreshOutputModeControl(unpack);
+    if (isWirelessUnpack(unpack)) unpack.__terryWirelessControl?.refresh?.();
+
+    const pack = findPackFromUnpack(unpack);
+    const entries = pack ? effectivePackLaneEntries(pack) : [];
+    syncWirelessBridgePackHeight(pack, entries);
+
+    if (!unpackExpanded(unpack)) {
+      const signature = `BUS:${String(pack?.id ?? "")}:${wirelessChannelName(unpack)}`;
+      const targetHeight = isWirelessUnpack(unpack) ? BUS_ONLY_WIRELESS_HEIGHT : BUS_ONLY_WIRED_HEIGHT;
+      const busOutputReady = (unpack.outputs?.length || 0) === 1
+        && String(unpack.outputs?.[0]?.type || "").toUpperCase() === BUS_TYPE
+        && unpack.outputs?.[0]?.[BUS_OUTPUT_FIELD] === true;
+      const matchingHeight = Math.abs(Number(unpack.size?.[1] || 0) - targetHeight) <= 0.5;
+
+      if (!force && unpack.__terryBusSignature === signature && busOutputReady && matchingHeight) return;
+
+      unpack.__terryBusSignature = signature;
+      ensureUnpackBusOutput(unpack);
+      resizeCompactBusNode(unpack, 1, null);
+      unpack.__terryBusRefreshVisual?.();
+      unpack.graph?.setDirtyCanvas?.(true, true);
+      return;
+    }
+
+    clearBusOnlyOutputForExpanded(unpack);
+
+    const signature = `EXP:${signatureForEntries(entries)}`;
+    if (!force && unpack.__terryBusSignature === signature) {
+      resizeCompactBusNode(unpack, entries.length, pack);
+      unpack.__terryBusRefreshVisual?.();
+      return;
+    }
+    unpack.__terryBusSignature = signature;
+
+    ensureUnpackLaneIds(unpack, entries.map((entry) => entry.lane));
+    const desiredIds = new Set(entries.map((entry) => entry.laneId));
+
+    for (let index = (unpack.outputs?.length || 0) - 1; index >= 0; index--) {
+      const output = unpack.outputs[index];
+      if (desiredIds.has(output?.[LANE_FIELD])) continue;
+      disconnectAllOutputLinks(unpack, index);
+      unpack.removeOutput?.(index);
+    }
+
+    for (const entry of entries) {
+      let output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
+      if (!output) {
+        const previousLength = unpack.outputs?.length || 0;
+        const added = unpack.addOutput?.(entry.name || labels().output, entry.type || EMPTY_TYPE);
+        output = unpack.outputs?.[previousLength] || added;
+        if (output) output[LANE_FIELD] = entry.laneId;
+      }
+    }
+
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index];
+      const output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
+      if (!output) continue;
+      delete output[BUS_OUTPUT_FIELD];
+      output.type = entry.type || EMPTY_TYPE;
+      if (output.type === BUS_TYPE) {
+        output.name = "bus";
+        output.label = labels().bus;
+      } else {
+        output.name = entry.source ? entry.name : emptyLaneLabel(entry.name, index);
+        output.label = output.name;
+      }
+      for (const linkId of output.links || []) syncConnectionType(unpack.graph, linkId, output.type);
+    }
+
+    nodeProperties(unpack)[UNPACK_LANES_PROPERTY] = (unpack.outputs || []).map(
+      (output) => output?.[LANE_FIELD] || ""
+    );
+
+    resizeCompactBusNode(unpack, entries.length, pack);
+    unpack.__terryBusRefreshVisual?.();
+    unpack.graph?.setDirtyCanvas?.(true, true);
+  } finally {
+    unpack.__terryBusSyncing = false;
+  }
 }
 
 function syncAllUnpacks() {
@@ -970,13 +1285,8 @@ function refreshPackSlots(pack) {
   localizeFixedPorts(pack);
   let entries = packLaneEntries(pack);
 
-  // First mirror every lane to connected unpack nodes. This gives legacy workflows
-  // stable lane ids before deciding whether an empty lane is still in use.
   for (const unpack of connectedUnpacksForPack(pack)) syncUnpack(unpack, true);
 
-  // A live input must never be removed merely because its upstream virtual
-  // output has not restored its lane identity yet. Unplugged lanes are retained
-  // while a paired output is connected and removed only when both ends are unused.
   const removable = entries.filter((entry) =>
     !entry.source && entry.input?.link == null && !laneHasOutputLinks(pack, entry.laneId)
   );
@@ -1039,13 +1349,10 @@ function executionPromptSource(prompt, source, current) {
 
   if (hasPromptNode(sourceId)) return [sourceId, sourceSlot];
 
-  // ComfyUI already resolves virtual outputs through subgraphs to flattened
-  // execution ids such as "311:198". Never replace those with a wrapper id.
   if (Array.isArray(current) && hasPromptNode(current[0])) {
     return [String(current[0]), Number(current[1]) || 0];
   }
 
-  // Recover the flattened source when an older frontend left a virtual link.
   const resolvedLink = source?.node?.getInputLink?.(sourceSlot);
   const resolvedId = resolvedLink?.origin_id ?? resolvedLink?.originId;
   if (hasPromptNode(resolvedId)) {
@@ -1071,7 +1378,7 @@ function patchGraphToPrompt() {
 
       for (const graph of allGraphs(this.graph || app.graph)) {
         for (const unpack of graph?._nodes || []) {
-          if (!isUnpack(unpack)) continue;
+          if (!isUnpack(unpack) || !unpackExpanded(unpack)) continue;
           const pack = findPackFromUnpack(unpack);
           if (!pack) continue;
           const entries = effectivePackLaneEntries(pack);
@@ -1084,7 +1391,13 @@ function patchGraphToPrompt() {
             );
             if (outputIndex < 0) continue;
             for (const target of collectDownstreamTargets(graph, unpack, outputIndex)) {
-              if (isPack(target.node) || isUnpack(target.node) || isReroute(target.node) || isGet(target.node) || isSet(target.node)) continue;
+              if (
+                isPack(target.node)
+                || isUnpack(target.node)
+                || isReroute(target.node)
+                || isGet(target.node)
+                || isSet(target.node)
+              ) continue;
               const targetPrompt = prompt[String(target.nodeId)] || prompt[target.nodeId];
               const input = target.node?.inputs?.[target.slot];
               if (!targetPrompt?.inputs || !input?.name) continue;
@@ -1104,25 +1417,31 @@ function patchGraphToPrompt() {
 
 let bridgeTimer = null;
 let lastBridgeLocale = localeCode();
+
 function startBridge() {
   if (bridgeTimer) return;
   bridgeTimer = setInterval(() => {
     const nextLocale = localeCode();
     const localeChanged = nextLocale !== lastBridgeLocale;
     if (localeChanged) lastBridgeLocale = nextLocale;
+
     for (const graph of allGraphs()) {
       for (const node of graph?._nodes || []) {
         if (isWireless(node)) {
           initializeWirelessControl(node);
           if (localeChanged) node.__terryWirelessControl?.refresh?.();
         }
+
         if (isPack(node)) {
           localizeFixedPorts(node, localeChanged);
           if (isWirelessPack(node)) syncWirelessBridgePackHeight(node);
           const last = node.inputs?.[node.inputs.length - 1];
           if (last?.link == null && last?.type === EMPTY_TYPE) last.label = labels().addWire;
         }
+
         if (isUnpack(node)) {
+          initializeUnpackOutputModeControl(node);
+          if (localeChanged) refreshOutputModeControl(node);
           localizeFixedPorts(node, localeChanged);
           syncUnpack(node);
         }
@@ -1150,30 +1469,31 @@ app.registerExtension({
   name: "TerryXu.WireBus",
 
   addCustomNodeDefs(defs) {
-  const text = labels();
-  defs[WIRELESS_PACK_TYPE] = makeNodeDef(
-    WIRELESS_PACK_TYPE,
-    text.wirelessPackTitle,
-    text.wirelessPackDescription,
-    text.category,
-    { required: { wire: [EMPTY_TYPE, { label: text.addWire }] } },
-    [BUS_TYPE],
-    [text.bus]
-  );
-  defs[WIRELESS_UNPACK_TYPE] = makeNodeDef(
-    WIRELESS_UNPACK_TYPE,
-    text.wirelessUnpackTitle,
-    text.wirelessUnpackDescription,
-    text.category,
-    { required: { bus: [BUS_TYPE, { label: text.bus }] } },
-    [],
-    []
-  );
-},
+    const text = labels();
+    defs[WIRELESS_PACK_TYPE] = makeNodeDef(
+      WIRELESS_PACK_TYPE,
+      text.wirelessPackTitle,
+      text.wirelessPackDescription,
+      text.category,
+      { required: { wire: [EMPTY_TYPE, { label: text.addWire }] } },
+      [BUS_TYPE],
+      [text.bus]
+    );
+    defs[WIRELESS_UNPACK_TYPE] = makeNodeDef(
+      WIRELESS_UNPACK_TYPE,
+      text.wirelessUnpackTitle,
+      text.wirelessUnpackDescription,
+      text.category,
+      { required: { bus: [BUS_TYPE, { label: text.bus }] } },
+      [],
+      []
+    );
+  },
 
   beforeRegisterNodeDef(nodeType, nodeData) {
     const nodeName = nodeData.name;
     if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE].includes(nodeName)) return;
+
     const isPackDef = nodeName === PACK_TYPE || nodeName === WIRELESS_PACK_TYPE;
     const isWirelessDef = nodeName === WIRELESS_PACK_TYPE || nodeName === WIRELESS_UNPACK_TYPE;
 
@@ -1193,8 +1513,6 @@ app.registerExtension({
 
         const result = originalCollapse.apply(this, arguments);
         if (wasCollapsed && !this.flags?.collapsed) {
-          const saved = this.__terryBusExpandedSize;
-          if (saved?.[1] > 0) this.setSize?.([...saved]);
           if (isPackDef) refreshPackSlots(this);
           else syncUnpack(this, true);
         }
@@ -1220,8 +1538,12 @@ app.registerExtension({
       this.isVirtualNode = true;
       this.serialize_widgets = isWirelessDef;
       this.resizable = false;
+
       if (isWirelessDef) initializeWirelessWidget(this);
+      if (!isPackDef) initializeUnpackOutputModeControl(this);
+
       localizeFixedPorts(this, true);
+
       if (isPackDef) {
         const first = this.inputs?.[0];
         if (first && this.inputs.length === 1 && first.link == null && !first[LANE_FIELD]) {
@@ -1255,39 +1577,50 @@ app.registerExtension({
         if (isPackDef && !app.configuringGraph) queueMicrotask(() => refreshWirelessChannels());
         return result;
       };
+    }
 
-      if (!isPackDef) {
-        // Match KJNodes GetNode's virtual-link contract so ComfyUI can discover
-        // the real execution dependency before graphToPrompt expands outputs.
-        nodeType.prototype.getInputLink = function (slot) {
-          const pack = findPackFromUnpack(this);
-          if (!pack) return null;
-          const laneId = this.outputs?.[Number(slot) || 0]?.[LANE_FIELD];
-          const entry = laneId
-            ? effectivePackLaneEntries(pack).find((item) => item.laneId === laneId)
-            : null;
-          const inputGraph = entry?.inputGraph || pack.graph;
-          return entry?.input?.link == null || inputGraph !== this.graph
-            ? null
-            : getLink(inputGraph, entry.input.link);
-        };
+    if (!isPackDef) {
+      nodeType.prototype.getInputLink = function (slot) {
+        const pack = findPackFromUnpack(this);
+        if (!pack) return null;
 
-        nodeType.prototype.resolveVirtualOutput = function (slot) {
-          const pack = findPackFromUnpack(this);
-          const laneId = this.outputs?.[Number(slot) || 0]?.[LANE_FIELD];
-          const entry = pack && laneId
-            ? effectivePackLaneEntries(pack).find((item) => item.laneId === laneId)
-            : null;
-          const source = entry?.source;
-          return source ? { node: source.node, slot: source.slot } : undefined;
-        };
-      }
+        if (!unpackExpanded(this) && Number(slot) === 0) {
+          const direct = this.inputs?.[0]?.link;
+          return direct == null ? null : getLink(this.graph, direct);
+        }
+
+        const laneId = this.outputs?.[Number(slot) || 0]?.[LANE_FIELD];
+        const entry = laneId
+          ? effectivePackLaneEntries(pack).find((item) => item.laneId === laneId)
+          : null;
+        const inputGraph = entry?.inputGraph || pack.graph;
+        return entry?.input?.link == null || inputGraph !== this.graph
+          ? null
+          : getLink(inputGraph, entry.input.link);
+      };
+
+      nodeType.prototype.resolveVirtualOutput = function (slot) {
+        const pack = findPackFromUnpack(this);
+        if (!pack) return undefined;
+
+        if (!unpackExpanded(this) && Number(slot) === 0) {
+          return { node: pack, slot: 0 };
+        }
+
+        const laneId = this.outputs?.[Number(slot) || 0]?.[LANE_FIELD];
+        const entry = laneId
+          ? effectivePackLaneEntries(pack).find((item) => item.laneId === laneId)
+          : null;
+        const source = entry?.source;
+        return source ? { node: source.node, slot: source.slot } : undefined;
+      };
     }
 
     const originalConnections = nodeType.prototype.onConnectionsChange;
     nodeType.prototype.onConnectionsChange = function (type, index) {
       const result = originalConnections?.apply(this, arguments);
-      if (app.configuringGraph) return result;
+      if (app.configuringGraph || this.__terryBusSyncing) return result;
+
       if (isPackDef) {
         if (type === LiteGraph.INPUT) queueMicrotask(() => refreshPackSlots(this));
         else queueMicrotask(syncAllUnpacks);
@@ -1295,40 +1628,50 @@ app.registerExtension({
         queueMicrotask(() => syncUnpack(this, true));
       } else if (type === LiteGraph.OUTPUT) {
         const pack = findPackFromUnpack(this);
-        if (pack) queueMicrotask(() => refreshPackSlots(pack));
+        if (pack && unpackExpanded(this)) queueMicrotask(() => refreshPackSlots(pack));
       }
       return result;
     };
 
     if (isPackDef) {
-    nodeType.prototype.__terryBusLaneEntries = function () {
-      return effectivePackLaneEntries(this);
-    };
-    nodeType.prototype.onConnectInput = function (slot, type) {
-      return slot >= 0 && type !== BUS_TYPE;
-    };
-    nodeType.prototype.onConnectOutput = function (slot, type, input, targetNode) {
-      return slot === 0 && (
-        isWirelessUnpack(targetNode)
-        || isReroute(targetNode)
-        || isSet(targetNode)
-      );
-    };
-  } else {
-    nodeType.prototype.onConnectInput = function (slot, type, output, originNode) {
-      return slot === 0 && (
-        type === BUS_TYPE
-        || isWirelessPack(originNode)
-        || isReroute(originNode)
-        || isGet(originNode)
-      );
-    };
-  }
+      nodeType.prototype.__terryBusLaneEntries = function () {
+        return effectivePackLaneEntries(this);
+      };
+
+      nodeType.prototype.onConnectInput = function (slot, type) {
+        return slot >= 0 && type !== BUS_TYPE;
+      };
+
+      nodeType.prototype.onConnectOutput = function (slot, type, input, targetNode) {
+        return Number(slot) === 0 && canConnectBusOutput(targetNode, input);
+      };
+    } else {
+      nodeType.prototype.onConnectInput = function (slot, type, output, originNode) {
+        return Number(slot) === 0 && (
+          type === BUS_TYPE
+          || isPack(originNode)
+          || isReroute(originNode)
+          || isGet(originNode)
+        );
+      };
+
+      nodeType.prototype.onConnectOutput = function (slot, type, input, targetNode) {
+        if (
+          !unpackExpanded(this)
+          && Number(slot) === 0
+          && String(this.outputs?.[0]?.type || type || "").toUpperCase() === BUS_TYPE
+        ) {
+          return canConnectBusOutput(targetNode, input);
+        }
+        return true;
+      };
+    }
 
     const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function () {
       const result = originalConfigure?.apply(this, arguments);
       this.resizable = false;
+
       if (isWirelessDef) {
         initializeWirelessWidget(this);
         initializeWirelessControl(this);
@@ -1338,6 +1681,9 @@ app.registerExtension({
         setWirelessChannel(this, restored, false);
         if (!isPackDef) refreshWirelessCombo(this);
       }
+
+      if (!isPackDef) initializeUnpackOutputModeControl(this);
+
       localizeFixedPorts(this, true);
       if (isPackDef) queueMicrotask(() => refreshPackSlots(this));
       else queueMicrotask(() => syncUnpack(this, true));
@@ -1356,7 +1702,10 @@ app.registerExtension({
     for (const graph of allGraphs()) {
       for (const node of graph?._nodes || []) {
         if (isPack(node)) refreshPackSlots(node);
-        if (isUnpack(node)) syncUnpack(node, true);
+        if (isUnpack(node)) {
+          initializeUnpackOutputModeControl(node);
+          syncUnpack(node, true);
+        }
       }
     }
     refreshWirelessChannels();
