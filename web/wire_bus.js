@@ -1154,9 +1154,19 @@ function syncWirelessBridgePackHeight(pack, publishedEntries = null) {
 function ensureUnpackBusOutput(unpack) {
   const outputs = unpack.outputs || [];
   const current = outputs[0];
+
+  // Dynamic slot metadata is not guaranteed to round-trip through every
+  // ComfyUI graph serializer. A restored BUS-only output can therefore
+  // lose BUS_OUTPUT_FIELD even though it is still the same physical slot.
+  // Reuse that slot in place so its outgoing links survive reload.
+  // A real expanded lane always carries LANE_FIELD, so toggling from an
+  // expanded single-lane output still rebuilds the slot as intended.
   const alreadyBusOnly = outputs.length === 1
     && String(current?.type || "").toUpperCase() === BUS_TYPE
-    && current?.[BUS_OUTPUT_FIELD] === true;
+    && (
+      current?.[BUS_OUTPUT_FIELD] === true
+      || !current?.[LANE_FIELD]
+    );
 
   if (!alreadyBusOnly) {
     removeAllOutputs(unpack);
@@ -1173,6 +1183,11 @@ function ensureUnpackBusOutput(unpack) {
     current.name = "bus";
     current.label = labels().bus;
     current.type = BUS_TYPE;
+    current[BUS_OUTPUT_FIELD] = true;
+    delete current[LANE_FIELD];
+    for (const linkId of current.links || []) {
+      syncConnectionType(unpack.graph, linkId, BUS_TYPE);
+    }
   }
 
   nodeProperties(unpack)[UNPACK_LANES_PROPERTY] = [];
