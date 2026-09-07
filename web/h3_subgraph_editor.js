@@ -139,6 +139,9 @@ function ensurePromotion(subgraphNode, sourceNode, widgetName) {
     return null;
   }
 
+  // ComfyUI's SubgraphNode listens to input-connected and resolves the promoted
+  // widget from the concrete interior prompt/boolean widget. Keep that official
+  // binding rather than creating a second TerryXu value store.
   subgraphNode.expandToFitContent?.();
   subgraphNode.setDirtyCanvas?.(true, true);
   subgraphNode.graph?.setDirtyCanvas?.(true, true);
@@ -171,10 +174,19 @@ function hostWidgetForInput(subgraphNode, input) {
     || null;
 }
 
+function disposePromotedMount(node) {
+  const state = node?.__terryH3PromotedPromptMount;
+  try { state?.dispose?.(); } catch {}
+  delete node.__terryH3PromotedPromptMount;
+}
+
 function setupSubgraphNode(node, attempt = 0) {
   if (!isSubgraphNode(node)) return false;
   const h3Nodes = directH3Nodes(node);
-  if (h3Nodes.length !== 1) return false;
+  if (h3Nodes.length !== 1) {
+    disposePromotedMount(node);
+    return false;
+  }
   const h3 = h3Nodes[0];
 
   const promptSlot = ensurePromotion(node, h3, PROMPT_WIDGET);
@@ -184,8 +196,9 @@ function setupSubgraphNode(node, attempt = 0) {
     return false;
   }
 
-  // Rebuild only once for workflows created by the older hidden-widget build.
-  // New promotions are already bound by ComfyUI's input-connected lifecycle.
+  // One-time migration for workflows that were saved while prompt had been
+  // converted to a hidden widget. Current ComfyUI then rebuilds the host from
+  // the canonical customtext/BOOLEAN source widgets.
   if (!node.__terryH3PromotionMigrated) {
     node.__terryH3PromotionMigrated = true;
     try { node.rebuildInputWidgetBindings?.(); } catch {}
@@ -200,7 +213,16 @@ function setupSubgraphNode(node, attempt = 0) {
     return false;
   }
 
-  if (node.__terryH3PromotedPromptMount?.promptWidget === promptWidget) return true;
+  const existing = node.__terryH3PromotedPromptMount;
+  if (
+    existing?.promptWidget === promptWidget
+    && existing?.wrap?.isConnected
+    && existing?.textarea?.isConnected
+  ) {
+    existing.render?.();
+    return true;
+  }
+  if (existing) disposePromotedMount(node);
 
   const state = mountH3PromptWidget({
     hostNode: node,
@@ -236,13 +258,7 @@ function start() {
   if (timer) return;
   timer = setInterval(() => {
     setupAllSubgraphs();
-    const root = app.graph?.rootGraph || app.graph;
-    for (const graph of allGraphs(root)) {
-      for (const node of graph?._nodes || graph?.nodes || []) {
-        node?.__terryH3PromotedPromptMount?.render?.();
-      }
-    }
-  }, 300);
+  }, 350);
 }
 
 app.registerExtension({
