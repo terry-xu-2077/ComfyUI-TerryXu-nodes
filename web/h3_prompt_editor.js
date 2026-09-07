@@ -16,6 +16,7 @@ const VIEW_PROP = "terry_h3_view_mode";
 const VIEW_VISUAL = "visual";
 const VIEW_RAW = "raw";
 const MAX_MEDIA = 32;
+const BUS_TYPE = "TERRY_WIRE_BUS";
 function isTarget(node) {
   if (!node) return false;
   return [node.comfyClass, node.type, node.constructor?.type, node.constructor?.comfyClass, node.constructor?.nodeData?.name]
@@ -162,6 +163,16 @@ function ensureSingleMediaInput(node) {
   node._widgetSlotsDirty = true;
 }
 
+function isSubgraphInputNode(node, graph) {
+  if (!node) return false;
+  if (graph?.inputNode && (node === graph.inputNode || String(node.id) === String(graph.inputNode.id))) return true;
+  try {
+    if (node.isSubgraphInputNode?.()) return true;
+  } catch {}
+  const type = String(node.comfyClass || node.type || node.constructor?.type || node.constructor?.name || "").toLowerCase();
+  return type.includes("subgraphinput") || type.includes("subgraph input");
+}
+
 function convertNativeMediaConnection(node, inputIndex, info = null) {
   if (!isTarget(node) || node.__terryClearingLink) return false;
   const input = node.inputs?.[inputIndex];
@@ -174,6 +185,13 @@ function convertNativeMediaConnection(node, inputIndex, info = null) {
   if (!src) return false;
   const rawSlot = native.origin_slot ?? native.originSlot ?? native.from_slot ?? native.fromSlot ?? 0;
   const slot = Number(rawSlot) || 0;
+  const nativeType = String(native.type || src.outputs?.[slot]?.type || "").toUpperCase();
+
+  // BUS and SubgraphInput are structural topology. They must remain physical
+  // links across save/load and subgraph conversion; only direct media is
+  // virtualized into H3's multi-reference list.
+  if (nativeType === BUS_TYPE || isSubgraphInputNode(src, graph)) return false;
+
   const added = addVirtualLink(node, src, slot, native.type || src.outputs?.[slot]?.type || "*");
   node.__terryClearingLink = true;
   try {
@@ -583,7 +601,12 @@ function installNode(nodeType, nodeData) {
   nodeType.prototype.onSerialize = function(info) {
     syncFromEditor(this, false);
     const r = serialize?.apply(this, arguments);
-    if (info) { info.properties ||= {}; info.properties[LINKS_PROP] = ensureLinks(this); info.properties[VIEW_PROP] = viewMode(this); }
+    if (info) {
+      info.properties ||= {};
+      const direct = this.__terryNativeBus?.getDirectLinks?.();
+      info.properties[LINKS_PROP] = Array.isArray(direct) ? direct : ensureLinks(this);
+      info.properties[VIEW_PROP] = viewMode(this);
+    }
     return r;
   };
 }
