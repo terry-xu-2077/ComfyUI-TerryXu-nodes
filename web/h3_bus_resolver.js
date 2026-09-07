@@ -178,29 +178,44 @@ export function h3IsBusLinkInfo(node, linkInfo) {
   return false;
 }
 
+function collectPackMedia(pack, result, seenMedia, seenPacks) {
+  if (!pack?.graph) return;
+  const packKey = `${h3NodeType(pack)}:${String(pack.id)}`;
+  if (seenPacks.has(packKey)) return;
+  seenPacks.add(packKey);
+
+  for (const input of pack.inputs || []) {
+    if (input?.link == null) continue;
+    const source = h3ResolveUpstream(pack.graph, input.link);
+    if (!source) continue;
+    const type = String(source.type || source.node?.outputs?.[source.slot]?.type || "*").toUpperCase();
+
+    if (H3_MEDIA_TYPES.has(type)) {
+      const key = `${source.nodeId}:${source.slot}`;
+      if (seenMedia.has(key)) continue;
+      seenMedia.add(key);
+      result.push({
+        source_id: Number(source.nodeId),
+        source_slot: Number(source.slot) || 0,
+        source_type: type,
+        kind: h3MediaKind(type),
+      });
+      continue;
+    }
+
+    if (type === H3_BUS_TYPE && H3_BUS_PACK_TYPES.has(h3NodeType(source.node))) {
+      collectPackMedia(source.node, result, seenMedia, seenPacks);
+    }
+  }
+}
+
 export function h3CollectBusMedia(node) {
   const resolvedBus = h3ResolveNativeBus(node);
   const pack = resolvedBus?.pack;
   if (!pack?.graph) return [];
 
   const result = [];
-  const seen = new Set();
-  for (const input of pack.inputs || []) {
-    if (input?.link == null) continue;
-    const source = h3ResolveUpstream(pack.graph, input.link);
-    if (!source) continue;
-    const type = String(source.type || source.node?.outputs?.[source.slot]?.type || "*").toUpperCase();
-    if (!H3_MEDIA_TYPES.has(type)) continue;
-    const key = `${source.nodeId}:${source.slot}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push({
-      source_id: Number(source.nodeId),
-      source_slot: Number(source.slot) || 0,
-      source_type: type,
-      kind: h3MediaKind(type),
-    });
-  }
+  collectPackMedia(pack, result, new Set(), new Set());
   return result;
 }
 
