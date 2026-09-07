@@ -4,6 +4,8 @@ const NODE_ID = "TerryXuH3PromptEditor";
 const SOURCE_INPUT = "source_text";
 const LOCAL_PROMPT_PROP = "terry_h3_local_prompt_before_preview";
 const READONLY_CLASS = "terry-h3-readonly-preview";
+const PREVIEW_SINK_TYPE = "TerryXuH3PreviewSink";
+const PREVIEW_SINK_PREFIX = "__terry_h3_preview_sink__";
 
 function isTarget(node) {
   if (!node) return false;
@@ -31,6 +33,37 @@ function ensureProperties(node) {
   node.properties ||= {};
   return node.properties;
 }
+
+function patchPreviewExecution() {
+  const current = app.graphToPrompt;
+  if (typeof current !== "function" || current.__terryH3PreviewExecution) return;
+
+  const previous = current;
+  const wrapped = async function() {
+    const data = await previous.apply(this, arguments);
+    const output = data?.output;
+    if (!output) return data;
+
+    for (const node of app.graph?._nodes || []) {
+      if (!isTarget(node) || !sourceConnected(node)) continue;
+      const nodeId = String(node.id);
+      if (!output[nodeId]) continue;
+
+      // This node exists only in the execution prompt. It is intentionally not
+      // added to the LiteGraph workflow, so save/load remains unchanged.
+      const sinkId = `${PREVIEW_SINK_PREFIX}${nodeId}`;
+      output[sinkId] = {
+        inputs: { text: [nodeId, 0] },
+        class_type: PREVIEW_SINK_TYPE,
+        _meta: { title: "H3 Preview" },
+      };
+    }
+    return data;
+  };
+  wrapped.__terryH3PreviewExecution = true;
+  app.graphToPrompt = wrapped;
+}
+
 
 function hasSavedLocalPrompt(node) {
   return Object.prototype.hasOwnProperty.call(node?.properties || {}, LOCAL_PROMPT_PROP);
@@ -262,6 +295,11 @@ if (typeof document !== "undefined" && !document.getElementById("terry-h3-readon
 
 app.registerExtension({
   name: "TerryXu.H3TextPreviewMode",
+  setup() {
+    patchPreviewExecution();
+    queueMicrotask(patchPreviewExecution);
+    setTimeout(patchPreviewExecution, 0);
+  },
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (String(nodeData?.name || "") !== NODE_ID) return;
     patchNodeType(nodeType);
@@ -273,6 +311,7 @@ app.registerExtension({
     if (isTarget(node)) syncModeSoon(node);
   },
   afterConfigureGraph() {
+    patchPreviewExecution();
     for (const node of app.graph?._nodes || []) if (isTarget(node)) syncModeSoon(node);
   },
 });

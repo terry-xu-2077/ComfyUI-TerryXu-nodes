@@ -5,6 +5,7 @@ from .nodes import (
     BooleanSwitch,
     BoolSwitch,
     H3PromptEditor,
+    H3PreviewSink,
     LineSwitch,
 )
 
@@ -23,6 +24,7 @@ class TerryXuExtension(ComfyExtension):
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
             H3PromptEditor,
+            H3PreviewSink,
             LineSwitch,
             BoolSwitch,
             BooleanSwitch,
