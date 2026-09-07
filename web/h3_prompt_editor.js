@@ -42,9 +42,8 @@ function promptTextarea(widget) {
 
 function prepareCanonicalPromptWidget(widget) {
   if (!widget) return;
-  // Keep the backend-created prompt widget as the one and only value owner.
-  // H3 only decorates its DOM; subgraph promotion therefore sees a normal
-  // multiline customtext widget and keeps using ComfyUI's widget store.
+  // prompt remains the one and only official ComfyUI value widget. H3 merely
+  // overlays its rich editor onto the textarea's DOM host.
   if (widget.type === "hidden") widget.type = "customtext";
   widget.hidden = false;
   widget.options ||= {};
@@ -56,6 +55,23 @@ function prepareCanonicalPromptWidget(widget) {
   }
   widget.options.minNodeSize = [400, 280];
   widget.__terryH3CanonicalPromptWidget = true;
+}
+
+function allGraphs(root = app.graph?.rootGraph || app.graph) {
+  if (!root) return [];
+  const result = [];
+  const seen = new Set();
+  const queue = [root];
+  while (queue.length) {
+    const graph = queue.shift();
+    if (!graph || seen.has(graph)) continue;
+    seen.add(graph);
+    result.push(graph);
+    for (const node of graph?._nodes || graph?.nodes || []) {
+      if (node?.subgraph && !seen.has(node.subgraph)) queue.push(node.subgraph);
+    }
+  }
+  return result;
 }
 
 function ensureLinks(node) {
@@ -111,9 +127,8 @@ function normalizeLinks(node) {
     const slot = Number(link?.source_slot) || 0;
     if (!Number.isFinite(id) || id === Number(node.id)) continue;
     const src = graph?.getNodeById?.(id);
-    // BUS links can point across a subgraph boundary and are resolved by the
-    // native BUS module. Keep the stored descriptor even if the local graph
-    // cannot resolve its display source directly.
+    // BUS media may resolve from an ancestor graph. The native BUS module owns
+    // that mapping, so keep its descriptor even when this local graph cannot.
     if (!src && String(link?.source_type || "").toUpperCase() !== BUS_TYPE) continue;
     const key = `${id}:${slot}`;
     if (seen.has(key)) continue;
@@ -127,6 +142,16 @@ function normalizeLinks(node) {
   }
   node.properties[LINKS_PROP] = out.slice(0, MAX_MEDIA);
   return node.properties[LINKS_PROP];
+}
+
+function directLinksForDrawing(node) {
+  // BUS is a real structural link. Expanded BUS media is useful for H3 tags and
+  // execution, but must never be redrawn as fake source→H3 direct wires.
+  try {
+    const direct = node?.__terryNativeBus?.getDirectLinks?.();
+    if (Array.isArray(direct)) return direct;
+  } catch {}
+  return normalizeLinks(node);
 }
 
 function addVirtualLink(node, source, sourceSlot = 0, sourceTypeValue = "") {
@@ -202,7 +227,7 @@ function convertNativeMediaConnection(node, inputIndex, info = null) {
   const slot = Number(rawSlot) || 0;
   const nativeType = String(native.type || src.outputs?.[slot]?.type || "").toUpperCase();
 
-  // BUS/SubgraphInput links are structural and must survive subgraph conversion.
+  // BUS and SubgraphInput are structural links and must remain physical.
   if (nativeType === BUS_TYPE || isSubgraphInputBoundaryNode(src)) return false;
 
   const added = addVirtualLink(node, src, slot, native.type || src.outputs?.[slot]?.type || "*");
@@ -235,7 +260,7 @@ function drawVirtualLinks(canvas, ctx) {
     const inputIndex = getMediaInputIndex(target);
     if (inputIndex < 0) continue;
     const end = connectionPos(target, true, inputIndex);
-    for (const link of normalizeLinks(target)) {
+    for (const link of directLinksForDrawing(target)) {
       const src = target.graph?.getNodeById?.(Number(link.source_id)) || app.graph?.getNodeById?.(Number(link.source_id));
       if (!src) continue;
       const start = connectionPos(src, false, Number(link.source_slot) || 0);
@@ -353,17 +378,9 @@ function findNodeInHierarchy(preferredGraph, id) {
   const direct = preferredGraph?.getNodeById?.(id);
   if (direct) return direct;
   const root = preferredGraph?.rootGraph || app.graph?.rootGraph || app.graph;
-  const queue = [root];
-  const seen = new Set();
-  while (queue.length) {
-    const graph = queue.shift();
-    if (!graph || seen.has(graph)) continue;
-    seen.add(graph);
-    const node = graph.getNodeById?.(id);
+  for (const graph of allGraphs(root)) {
+    const node = graph?.getNodeById?.(id);
     if (node) return node;
-    for (const item of graph?._nodes || graph?.nodes || []) {
-      if (item?.subgraph && !seen.has(item.subgraph)) queue.push(item.subgraph);
-    }
   }
   return null;
 }
@@ -408,27 +425,6 @@ function watchSourceNode(node) {
   }
 }
 
-let refreshTimer = null;
-function refreshEditorsSoon() {
-  if (refreshTimer) return;
-  refreshTimer = setTimeout(() => {
-    refreshTimer = null;
-    const root = app.graph?.rootGraph || app.graph;
-    const queue = [root];
-    const seen = new Set();
-    while (queue.length) {
-      const graph = queue.shift();
-      if (!graph || seen.has(graph)) continue;
-      seen.add(graph);
-      for (const node of graph?._nodes || graph?.nodes || []) {
-        if (isTarget(node)) refreshEditor(node);
-        if (node?.subgraph) queue.push(node.subgraph);
-        node?.__terryH3PromotedPromptMount?.render?.();
-      }
-    }
-  }, 0);
-}
-
 function widgetValue(widget, fallback = "") {
   return widget == null ? fallback : widget.value;
 }
@@ -451,7 +447,13 @@ export function mountH3PromptWidget({
   promoted = false,
 }) {
   if (!hostNode || !promptWidget || typeof document === "undefined") return null;
-  if (promptWidget.__terryH3RichMount) return promptWidget.__terryH3RichMount;
+
+  const previousMount = promptWidget.__terryH3RichMount;
+  if (previousMount?.wrap?.isConnected && previousMount?.textarea?.isConnected) return previousMount;
+  if (previousMount) {
+    try { previousMount.dispose?.(); } catch {}
+    delete promptWidget.__terryH3RichMount;
+  }
 
   prepareCanonicalPromptWidget(promptWidget);
   const textarea = promptTextarea(promptWidget);
@@ -516,6 +518,7 @@ export function mountH3PromptWidget({
     render: null,
     setValue: null,
     sync: null,
+    dispose: null,
   };
 
   const richOptions = () => ({
@@ -544,6 +547,7 @@ export function mountH3PromptWidget({
   };
 
   const render = (force = false) => {
+    if (!wrap.isConnected || !textarea.isConnected) return;
     const raw = readRaw();
     const visual = visualEnabled();
     const assets = getAssets();
@@ -575,11 +579,8 @@ export function mountH3PromptWidget({
     event.preventDefault();
     event.stopPropagation();
     const text = event.clipboardData?.getData("text/plain") || "";
-    if (visualEnabled()) {
-      insertH3RichTextAtSelection(editor, text, richOptions());
-    } else {
-      document.execCommand?.("insertText", false, text);
-    }
+    if (visualEnabled()) insertH3RichTextAtSelection(editor, text, richOptions());
+    else document.execCommand?.("insertText", false, text);
     syncFromEditor(true);
     render(true);
   });
@@ -614,9 +615,27 @@ export function mountH3PromptWidget({
     writeRaw(String(value ?? ""), false);
     render(true);
   };
+  state.dispose = () => {
+    try { state.menu?.destroy?.(); } catch {}
+    try { wrap.remove?.(); } catch {}
+    textarea.classList.remove("terry-h3-canonical-textarea");
+    mount.classList.remove("terry-h3-prompt-widget-host");
+    if (promptWidget.__terryH3RichMount === state) delete promptWidget.__terryH3RichMount;
+  };
+
   promptWidget.__terryH3RichMount = state;
-  render(true);
+  queueMicrotask(() => render(true));
   return state;
+}
+
+function clearNodeMount(node) {
+  const state = node?.__terryH3PromptMount;
+  try { state?.dispose?.(); } catch {}
+  delete node.__terryH3PromptMount;
+  delete node.__terryH3Editor;
+  delete node.__terryH3AssetState;
+  delete node.__terryH3Wrap;
+  delete node.__terryH3DomWidget;
 }
 
 function syncFromEditor(node, dirty = true) {
@@ -626,12 +645,21 @@ function syncFromEditor(node, dirty = true) {
 }
 
 function refreshEditor(node, force = false) {
-  node?.__terryH3PromptMount?.render?.(force);
+  const state = node?.__terryH3PromptMount;
+  if (!state?.wrap?.isConnected || !state?.textarea?.isConnected) {
+    clearNodeMount(node);
+    ensureEditor(node);
+    return;
+  }
+  state.render?.(force);
 }
 
 function ensureEditor(node) {
-  if (node.__terryH3PromptMount) return true;
-  if (typeof document === "undefined") return false;
+  if (!node || !isTarget(node) || typeof document === "undefined") return false;
+  const existing = node.__terryH3PromptMount;
+  if (existing?.wrap?.isConnected && existing?.textarea?.isConnected) return true;
+  if (existing) clearNodeMount(node);
+
   const prompt = getWidget(node, "prompt");
   if (!prompt) return false;
   const preview = getWidget(node, "visual_preview");
@@ -648,14 +676,24 @@ function ensureEditor(node) {
   node.__terryH3Editor = state.editor;
   node.__terryH3AssetState = state.assetState;
   node.__terryH3Wrap = state.wrap;
-  // Compatibility interface used by the read-only external-text mode. This is
-  // deliberately not a node widget; prompt remains the sole official widget.
+  // Compatibility API for the external STRING/TEXT read-only mode. This is not
+  // a ComfyUI widget; prompt remains the sole official value widget.
   node.__terryH3DomWidget = { setValue: state.setValue };
   node.setSize?.([
     Math.max(520, Number(node.size?.[0]) || 0),
     Math.max(430, Number(node.size?.[1]) || 0),
   ]);
   return true;
+}
+
+function ensureAllEditors(force = false) {
+  for (const graph of allGraphs()) {
+    for (const node of graph?._nodes || graph?.nodes || []) {
+      if (!isTarget(node)) continue;
+      if (!ensureEditor(node)) continue;
+      refreshEditor(node, force);
+    }
+  }
 }
 
 function installEditorSoon(node) {
@@ -665,12 +703,34 @@ function installEditorSoon(node) {
     node.__terryH3InstallPending = false;
     if (ensureEditor(node)) return;
     node.__terryH3InstallAttempts = (node.__terryH3InstallAttempts || 0) + 1;
-    if (node.__terryH3InstallAttempts < 12) {
+    if (node.__terryH3InstallAttempts < 16) {
       setTimeout(() => installEditorSoon(node), Math.min(1200, 60 + 80 * node.__terryH3InstallAttempts));
     }
   };
   if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
   else setTimeout(run, 0);
+}
+
+let refreshTimer = null;
+function refreshEditorsSoon() {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    ensureAllEditors(false);
+    for (const graph of allGraphs()) {
+      for (const node of graph?._nodes || graph?.nodes || []) {
+        node?.__terryH3PromotedPromptMount?.render?.();
+      }
+    }
+  }, 0);
+}
+
+let lifecycleTimer = null;
+function startEditorLifecycle() {
+  if (lifecycleTimer) return;
+  lifecycleTimer = setInterval(() => {
+    ensureAllEditors(false);
+  }, 350);
 }
 
 function installStyle() {
@@ -680,7 +740,7 @@ function installStyle() {
   style.textContent = `
 .terry-h3-prompt-widget-host{position:relative!important;overflow:hidden!important;min-height:280px!important;}
 .terry-h3-canonical-textarea{visibility:hidden!important;pointer-events:none!important;color:transparent!important;caret-color:transparent!important;}
-.terry-h3-wrap{position:absolute;inset:0;width:100%;height:100%;min-height:0;box-sizing:border-box;overflow:hidden;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#222);pointer-events:auto;}
+.terry-h3-wrap{position:absolute;z-index:1;inset:0;width:100%;height:100%;min-height:0;box-sizing:border-box;overflow:hidden;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#222);pointer-events:auto;}
 .terry-h3-editor{width:100%;height:100%;min-height:0;box-sizing:border-box;padding:10px 10px 34px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;outline:none;border:0;background:transparent;font:12px/1.6 Consolas,"Courier New",monospace}
 .terry-h3-editor:empty:before{content:attr(data-placeholder);opacity:.4;pointer-events:none}
 .terry-h3-tools{position:absolute;left:8px;right:8px;bottom:5px;display:flex;align-items:center;justify-content:space-between;gap:10px;pointer-events:none}
@@ -748,6 +808,12 @@ function installNode(nodeType, nodeData) {
     return result;
   };
 
+  const removed = nodeType.prototype.onRemoved;
+  nodeType.prototype.onRemoved = function() {
+    clearNodeMount(this);
+    return removed?.apply(this, arguments);
+  };
+
   const serialize = nodeType.prototype.onSerialize;
   nodeType.prototype.onSerialize = function(info) {
     syncFromEditor(this, false);
@@ -768,10 +834,12 @@ app.registerExtension({
     installH3RichTextStyles();
     patchCanvas();
     patchGraphToPrompt();
-    for (const delay of [0, 100, 400, 1000]) {
+    startEditorLifecycle();
+    for (const delay of [0, 100, 400, 1000, 2500]) {
       setTimeout(() => {
         patchCanvas();
         patchGraphToPrompt();
+        ensureAllEditors(delay === 2500);
         refreshEditorsSoon();
       }, delay);
     }
@@ -787,5 +855,9 @@ app.registerExtension({
       };
     }
     installNode(nodeType, nodeData);
+  },
+  afterConfigureGraph() {
+    queueMicrotask(() => ensureAllEditors(true));
+    setTimeout(() => ensureAllEditors(true), 150);
   },
 });
