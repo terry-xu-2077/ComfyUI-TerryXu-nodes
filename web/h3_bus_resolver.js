@@ -2,8 +2,13 @@ import { app } from "../../scripts/app.js";
 
 export const H3_BUS_TYPE = "TERRY_WIRE_BUS";
 export const H3_BUS_PACK_TYPE = "TerryXuWirelessBusPack";
+export const H3_WIRED_BUS_PACK_TYPE = "TerryXuWireBusPack";
 export const H3_WIRELESS_BUS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
+export const H3_WIRED_BUS_UNPACK_TYPE = "TerryXuWireBusUnpack";
 export const H3_MEDIA_TYPES = new Set(["IMAGE", "VIDEO", "AUDIO"]);
+
+const H3_BUS_PACK_TYPES = new Set([H3_BUS_PACK_TYPE, H3_WIRED_BUS_PACK_TYPE]);
+const H3_BUS_UNPACK_TYPES = new Set([H3_WIRELESS_BUS_UNPACK_TYPE, H3_WIRED_BUS_UNPACK_TYPE]);
 
 export function h3NodeType(node) {
   return String(
@@ -88,16 +93,28 @@ export function h3ResolveUpstream(graph, linkId, seen = new Set()) {
       return h3ResolveUpstream(setter.graph || graph, setter.inputs[0].link, seen);
     }
   }
-  if (h3NodeType(node) === H3_WIRELESS_BUS_UNPACK_TYPE) {
-    const resolved = node.resolveVirtualOutput?.(slot);
-    if (resolved?.node) {
-      const resolvedSlot = Number(resolved.slot) || 0;
-      return {
-        node: resolved.node,
-        nodeId: Number(resolved.node.id),
-        slot: resolvedSlot,
-        type: String(resolved.node.outputs?.[resolvedSlot]?.type || link.type || "*").toUpperCase(),
-      };
+
+  if (H3_BUS_UNPACK_TYPES.has(h3NodeType(node))) {
+    const outputType = String(node.outputs?.[slot]?.type || link.type || "*").toUpperCase();
+    try {
+      const resolved = node.resolveVirtualOutput?.(slot);
+      if (resolved?.node) {
+        const resolvedSlot = Number(resolved.slot) || 0;
+        return {
+          node: resolved.node,
+          nodeId: Number(resolved.node.id),
+          slot: resolvedSlot,
+          type: String(resolved.node.outputs?.[resolvedSlot]?.type || outputType || "*").toUpperCase(),
+        };
+      }
+    } catch {}
+
+    // Wired Bus-Out in BUS passthrough mode can still be resolved directly
+    // through its physical BUS input if the output-mode extension has not yet
+    // installed resolveVirtualOutput during graph restoration.
+    if (outputType === H3_BUS_TYPE && node.inputs?.[0]?.link != null) {
+      const upstream = h3ResolveUpstream(node.graph || graph, node.inputs[0].link, seen);
+      if (upstream) return upstream;
     }
   }
 
@@ -126,7 +143,7 @@ export function h3ResolveNativeBus(node) {
   if (!input || input.link == null) return null;
   const source = h3ResolveUpstream(node.graph || app.graph, input.link);
   if (!source) return null;
-  if (h3NodeType(source.node) !== H3_BUS_PACK_TYPE && source.type !== H3_BUS_TYPE) return null;
+  if (!H3_BUS_PACK_TYPES.has(h3NodeType(source.node)) && source.type !== H3_BUS_TYPE) return null;
   return { pack: source.node, source };
 }
 
@@ -145,17 +162,17 @@ export function h3IsBusLinkInfo(node, linkInfo) {
   const originNode = linkInfo.origin_node ?? linkInfo.originNode ?? linkInfo.fromNode ?? h3GetNode(graph, originId);
   if (!originNode) return false;
   const originType = String(originNode.outputs?.[originSlot]?.type || directType || "").toUpperCase();
-  if (originType === H3_BUS_TYPE || h3NodeType(originNode) === H3_BUS_PACK_TYPE) return true;
+  if (originType === H3_BUS_TYPE || H3_BUS_PACK_TYPES.has(h3NodeType(originNode))) return true;
 
   if (h3IsReroute(originNode) && originNode.inputs?.[0]?.link != null) {
     const resolved = h3ResolveUpstream(originNode.graph || graph, originNode.inputs[0].link);
-    if (resolved && (resolved.type === H3_BUS_TYPE || h3NodeType(resolved.node) === H3_BUS_PACK_TYPE)) return true;
+    if (resolved && (resolved.type === H3_BUS_TYPE || H3_BUS_PACK_TYPES.has(h3NodeType(resolved.node)))) return true;
   }
   if (h3IsGetNode(originNode)) {
     const setter = h3FindSetter(originNode);
     if (setter?.inputs?.[0]?.link != null) {
       const resolved = h3ResolveUpstream(setter.graph || graph, setter.inputs[0].link);
-      if (resolved && (resolved.type === H3_BUS_TYPE || h3NodeType(resolved.node) === H3_BUS_PACK_TYPE)) return true;
+      if (resolved && (resolved.type === H3_BUS_TYPE || H3_BUS_PACK_TYPES.has(h3NodeType(resolved.node)))) return true;
     }
   }
   return false;
