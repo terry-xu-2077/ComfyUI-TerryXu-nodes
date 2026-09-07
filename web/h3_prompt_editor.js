@@ -312,7 +312,7 @@ function previewFromSource(node, kind) {
   const filename = filenameFromSource(node, kind);
   if (filename) {
     const w = (node.widgets || []).find((x) => {
-      const v = w?.value;
+      const v = x?.value;
       return String(typeof v === "object" ? (v?.filename || v?.name || "") : (v || "")) === filename;
     });
     const v = w?.value;
