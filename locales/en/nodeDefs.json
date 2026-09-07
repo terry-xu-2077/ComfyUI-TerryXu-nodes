@@ -86,6 +86,20 @@
     "display_name": "🎛️ Group Manager",
     "description": "Manually select workflow groups and independently enable or bypass the nodes inside each group."
   },
+  "TerryXuBooleanSwitch": {
+    "display_name": "🔘 Boolean Switch",
+    "description": "Pure Boolean source. Toggle True / False locally, name it, and control it from TerryXu Remote Control by name.",
+    "inputs": {
+      "enabled": {
+        "name": "Switch"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Boolean"
+      }
+    }
+  },
   "TerryXuH3PromptEditor": {
     "display_name": "📃 H3 Prompt Editor",
     "description": "Visual MiniMax H3 prompt editor with dynamic image, video and audio references. Use @ for media and / for H3 syntax commands; output is always standard H3 STRING text.",
