@@ -68,34 +68,36 @@ function isStructuralMediaConnection(node, index, connected, linkInfo = null) {
   if (inputIndex !== h3MediaInputIndex(node)) return false;
   if (String(node?.inputs?.[inputIndex]?.name || "") !== "media") return false;
 
-  // Prefer the resolver's authoritative checks first. These understand nested
-  // subgraph boundaries and the TerryXu BUS type.
   try {
     if (h3IsBusLinkInfo(node, linkInfo)) return true;
     if (h3IsSubgraphInputLinkInfo(node, linkInfo)) return true;
   } catch {}
 
-  // During workflow restore, ComfyUI can deliver onConnectionsChange before
-  // linkInfo is fully populated. Resolve the physical graph link as fallback.
+  // Workflow restore can fire before linkInfo is fully populated. Resolve the
+  // actual physical link as a fallback so BUS cannot be mistaken for media.
   const { source, type } = sourceForConnection(node, inputIndex, linkInfo);
   return type === H3_BUS_TYPE || isSubgraphInputNode(source);
 }
 
 function patchH3Class(nodeTypeClass) {
   const proto = nodeTypeClass?.prototype;
-  if (!proto || proto.__terryH3BusTransportPatched) return;
+  if (!proto) return;
 
+  // Always inspect the current outermost handler. Other TerryXu H3 modules can
+  // register before or after this module, so a prototype-level one-shot marker
+  // is not sufficient: a later wrapper could otherwise bypass this guard.
   const previous = proto.onConnectionsChange;
-  proto.onConnectionsChange = function(type, index, connected, linkInfo) {
+  if (previous?.__terryH3BusTransportGuard) return;
+
+  function guardedConnections(type, index, connected, linkInfo) {
     if (!isStructuralMediaConnection(this, index, connected, linkInfo)) {
       return previous?.apply(this, arguments);
     }
 
-    // h3_prompt_editor converts ordinary IMAGE/VIDEO/AUDIO links into its
-    // virtual multi-reference representation. BUS and SubgraphInput are
-    // structural links and must never enter that conversion path. Reuse the
-    // existing __terryClearingLink guard so the original H3 behavior stays
-    // untouched for every non-structural media connection.
+    // Ordinary IMAGE/VIDEO/AUDIO references may be virtualized by the H3
+    // editor. BUS and SubgraphInput are topology, not assets. Setting the
+    // existing clearing flag prevents the legacy editor from scheduling its
+    // convert-to-direct-media path while leaving all other behavior intact.
     const previousClearing = this.__terryClearingLink;
     this.__terryClearingLink = true;
     try {
@@ -105,9 +107,10 @@ function patchH3Class(nodeTypeClass) {
       this.setDirtyCanvas?.(true, true);
       this.graph?.setDirtyCanvas?.(true, true);
     }
-  };
+  }
 
-  proto.__terryH3BusTransportPatched = true;
+  guardedConnections.__terryH3BusTransportGuard = true;
+  proto.onConnectionsChange = guardedConnections;
 }
 
 function patchRegisteredTypes() {
@@ -141,9 +144,9 @@ app.registerExtension({
   },
   beforeRegisterNodeDef(nodeType, nodeData) {
     if (!H3_TARGETS.has(String(nodeData?.name || ""))) return;
-    // This module is intentionally loaded after h3_prompt_editor.js, so its
-    // guard becomes the outermost connection policy. queueMicrotask also makes
-    // the ordering resilient if ComfyUI changes extension registration order.
+    // Re-run after all synchronous beforeRegisterNodeDef hooks for this class,
+    // making this the final structural connection policy regardless of module
+    // discovery order.
     queueMicrotask(() => patchH3Class(nodeType));
   },
   nodeCreated(node) {
