@@ -19,12 +19,35 @@ def _kind(value: Any) -> str:
     return "other"
 
 
-def _asset_items(assets: io.Autogrow.Type | None, asset_inputs: dict[str, Any]):
-    """Accept both grouped and flattened Autogrow inputs.
+def _single_input(value: Any, default: Any = None) -> Any:
+    """Unwrap a normal input after Schema(is_input_list=True).
 
-    ComfyUI 0.33 can call execute with asset1/asset2/... keyword arguments for
-    TemplatePrefix inputs. Older/newer normalized paths may provide an `assets`
-    mapping instead, so support both and keep numeric ordering stable.
+    ComfyUI wraps every input in a list when a node opts into whole-list input
+    handling. H3 only needs whole-list semantics for media assets, so ordinary
+    widgets/text inputs keep their existing single-value behaviour.
+    """
+    if isinstance(value, (list, tuple)):
+        return value[0] if value else default
+    return default if value is None else value
+
+
+def _flatten_asset_values(value: Any):
+    """Flatten ComfyUI execution lists while preserving source order."""
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _flatten_asset_values(item)
+        return
+    if value is not None:
+        yield value
+
+
+def _asset_items(assets: io.Autogrow.Type | None, asset_inputs: dict[str, Any]):
+    """Accept grouped/flattened Autogrow inputs and expand ComfyUI Lists.
+
+    With ``is_input_list=True`` each connected Autogrow transport input is a
+    Python list. A normal single IMAGE / VIDEO / AUDIO therefore arrives as a
+    one-item list, while an upstream OUTPUT_IS_LIST arrives as the complete
+    list. Both forms are flattened here into the same ordered asset stream.
     """
     merged: dict[str, Any] = {}
     if isinstance(assets, dict):
@@ -38,7 +61,11 @@ def _asset_items(assets: io.Autogrow.Type | None, asset_inputs: dict[str, Any]):
         suffix = name[5:] if name.startswith("asset") else ""
         return int(suffix) if suffix.isdigit() else 10**9
 
-    return sorted(merged.items(), key=order)
+    expanded: list[tuple[str, Any]] = []
+    for name, value in sorted(merged.items(), key=order):
+        for item in _flatten_asset_values(value):
+            expanded.append((name, item))
+    return expanded
 
 
 class H3PromptEditor(io.ComfyNode):
@@ -50,7 +77,10 @@ class H3PromptEditor(io.ComfyNode):
             input=io.AnyType.Input(
                 "asset",
                 display_name="参考",
-                tooltip="可连接 IMAGE / VIDEO / AUDIO；前端显示为一个可接受多条虚拟连线的参考入口。",
+                tooltip=(
+                    "可连接单个 IMAGE / VIDEO / AUDIO，也可连接 ComfyUI List；"
+                    "List 会按原顺序展开为多个参考素材。"
+                ),
             ),
             prefix="asset",
             # References are optional. The frontend only serializes hidden
@@ -67,9 +97,10 @@ class H3PromptEditor(io.ComfyNode):
             node_id="TerryXuH3PromptEditor",
             display_name="📃 H3提示词编辑器",
             category="TerryXu/Text",
+            is_input_list=True,
             search_aliases=["MiniMax H3", "H3 prompt", "H3 提示词", "reference prompt", "text preview"],
             description=(
-                "可视化编写 MiniMax H3 提示词；支持动态数量图片、视频、音频参考；"
+                "可视化编写 MiniMax H3 提示词；支持动态数量图片、视频、音频参考及 ComfyUI List 资产输入；"
                 "可连接外部 STRING / TEXT 作为只读 H3 预览；@ 插入媒体，/ 打开 H3 语法菜单；"
                 "输出始终为标准 H3 原文 STRING。"
             ),
@@ -100,18 +131,23 @@ class H3PromptEditor(io.ComfyNode):
     @classmethod
     def execute(
         cls,
-        prompt: str,
+        prompt: Any,
         source_text: Any | None = None,
-        visual_preview: bool = True,
+        visual_preview: Any = True,
         assets: io.Autogrow.Type | None = None,
         **asset_inputs,
     ) -> io.NodeOutput:
+        # is_input_list=True is enabled so the asset ports can receive complete
+        # ComfyUI Lists. Keep all non-asset controls backward-compatible by
+        # unwrapping their normal one-item execution lists here.
+        prompt_value = _single_input(prompt, "")
+        source_value = _single_input(source_text, None)
+        _single_input(visual_preview, True)  # Normalize for compatibility; UI owns preview mode.
+
         # A connected STRING or TEXT turns the node into a read-only
-        # preview/pass-through node. TEXT custom types are expected to carry
-        # textual runtime values; normalize them to Python str for output/rendering.
-        # An intentionally empty upstream value must remain empty, so only None
-        # means "not connected / no value supplied" here.
-        effective_prompt = str(source_text) if source_text is not None else str(prompt or "")
+        # preview/pass-through node. An intentionally empty upstream value must
+        # remain empty, so only None means "not connected / no value supplied".
+        effective_prompt = str(source_value) if source_value is not None else str(prompt_value or "")
 
         counts = {"picture": 0, "video": 0, "audio": 0, "other": 0}
         result = []
