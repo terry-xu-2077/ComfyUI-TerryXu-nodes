@@ -1078,6 +1078,15 @@ function compactBusNodeMinimumHeight(node, laneCount) {
   return COMPACT_NODE_SLOT_PADDING + visibleSlots * slotHeight + controlBlockHeight(node);
 }
 
+function stableExpandedHeight(node, fallback = 0) {
+  if (!node) return Math.max(0, Number(fallback) || 0);
+  const current = node.flags?.collapsed ? 0 : (Number(node.size?.[1]) || 0);
+  const stored = Number(node.__terryBusExpandedSize?.[1]) || 0;
+  const preferred = Number(node.__terryBusPreferredHeight) || 0;
+  const minimum = Number(node.__terryBusMinHeight) || 0;
+  return Math.max(Number(fallback) || 0, current, stored, preferred, minimum);
+}
+
 function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   if (!node) return;
 
@@ -1111,8 +1120,9 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
 
   let pairedHeight = 0;
   if (inheritsPairedHeight) {
-    pairedHeight = Number(pairedPack.size?.[1]) || 0;
-    if (isUnpack(node)) pairedHeight += OUTPUT_MODE_CONTROL_HEIGHT;
+    pairedHeight = stableExpandedHeight(pairedPack);
+    if (pairedHeight > 0 && isUnpack(node)) pairedHeight += OUTPUT_MODE_CONTROL_HEIGHT;
+    if (pairedHeight > 0) pairedHeight = Math.max(minHeight, pairedHeight);
   }
 
   const height = busOnly
@@ -1120,15 +1130,15 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
     : (pairedHeight || (customHeight ? Math.max(minHeight, currentHeight) : preferredHeight));
 
   node.__terryBusCompactWidth = COMPACT_NODE_WIDTH;
-  node.__terryBusMinHeight = pairedHeight ? Math.min(minHeight, pairedHeight) : minHeight;
+  node.__terryBusMinHeight = minHeight;
   node.__terryBusPreferredHeight = pairedHeight || preferredHeight;
   node.__terryBusLayoutInitialized = true;
 
   const blockHeight = controlBlockHeight(node);
   if (blockHeight > 0) node.widgets_start_y = Math.max(0, height - blockHeight);
 
-  if (!node.flags?.collapsed) node.__terryBusExpandedSize = [width, height];
-  node.setSize?.([width, height]);
+  node.__terryBusExpandedSize = [width, height];
+  if (!node.flags?.collapsed) node.setSize?.([width, height]);
 }
 
 function syncWirelessBridgePackHeight(pack, publishedEntries = null) {
@@ -1518,16 +1528,20 @@ app.registerExtension({
         const wasCollapsed = Boolean(this.flags?.collapsed);
         if (!wasCollapsed) {
           const width = Math.max(COMPACT_NODE_WIDTH, Number(this.size?.[0]) || 0);
-          const height = Math.max(
-            Number(this.size?.[1]) || 0,
-            Number(this.__terryBusPreferredHeight) || 0,
-            Number(this.__terryBusMinHeight) || 0
-          );
+          const height = stableExpandedHeight(this, Number(this.size?.[1]) || 0);
           if (height > 0) this.__terryBusExpandedSize = [width, height];
         }
 
         const result = originalCollapse.apply(this, arguments);
         if (wasCollapsed && !this.flags?.collapsed) {
+          const saved = this.__terryBusExpandedSize;
+          const width = Math.max(COMPACT_NODE_WIDTH, Number(saved?.[0]) || Number(this.size?.[0]) || 0);
+          const height = Math.max(
+            Number(saved?.[1]) || 0,
+            Number(this.__terryBusPreferredHeight) || 0,
+            Number(this.__terryBusMinHeight) || 0
+          );
+          if (height > 0) this.setSize?.([width, height]);
           if (isPackDef) refreshPackSlots(this);
           else syncUnpack(this, true);
         }
