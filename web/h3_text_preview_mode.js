@@ -6,10 +6,9 @@ const SOURCE_INPUT = "source_text";
 const LOCAL_PROMPT_PROP = "terry_h3_local_prompt_before_preview";
 const READONLY_CLASS = "terry-h3-readonly-preview";
 
-// Only these nodes are safe to read directly in the frontend. Their STRING
-// output is literally the value of their own widget, so no backend execution is
-// required to know the result. Every other STRING/TEXT source is treated as a
-// runtime source and may update H3 only through an executed result.
+// These nodes expose their final STRING value directly in a frontend widget.
+// Every other STRING/TEXT source is runtime-only and must be read from the H3
+// node's actual execution result.
 const LIVE_STRING_SOURCE_TYPES = new Set([
   "PrimitiveString",
   "PrimitiveStringMultiline",
@@ -125,9 +124,7 @@ function connectedSource(node) {
   try {
     const resolved = link.resolve?.(graph);
     source = resolved?.outputNode || resolved?.originNode || null;
-    if (resolved?.output) {
-      sourceSlot = Number(source?.outputs?.indexOf?.(resolved.output)) || 0;
-    }
+    if (resolved?.output) sourceSlot = Number(source?.outputs?.indexOf?.(resolved.output)) || 0;
   } catch {}
 
   const sourceId = link.origin_id ?? link.originId ?? link.from_id ?? link.fromId;
@@ -157,7 +154,6 @@ function executionNodeById(nodeId) {
 
   const parts = raw.split(":").filter(Boolean);
   let graph = app.graph?.rootGraph || app.graph;
-
   for (let index = 0; graph && index < parts.length - 1; index++) {
     graph = graphNode(graph, parts[index])?.subgraph || null;
   }
@@ -198,28 +194,28 @@ function setEditorValue(node, text) {
   const value = String(text ?? "");
   setPromptWidgetValue(node, value);
 
-  // ComfyUI DOMWidgetImpl writes through its `value` property. The H3 editor
-  // registered options.setValue(), so assigning value reuses the original rich
-  // renderer instead of creating a second rendering path here.
+  // H3's rich editor is a ComfyUI DOMWidget. The supported write path is the
+  // value property, which forwards into the original options.setValue renderer.
   const domWidget = node?.__terryH3DomWidget;
   if (domWidget) {
     try {
       domWidget.value = value;
+      node.__terryH3PreviewRenderedValue = value;
       return true;
     } catch {}
     try {
       if (typeof domWidget.options?.setValue === "function") {
         domWidget.options.setValue(value);
+        node.__terryH3PreviewRenderedValue = value;
         return true;
       }
     } catch {}
   }
 
-  // Graph restoration can create the rich DOM editor one tick later. Preserve
-  // the canonical hidden prompt now; normal H3 initialization will render it.
   const editor = node?.__terryH3Editor;
   if (editor && !editor.hasChildNodes()) {
     editor.textContent = value;
+    node.__terryH3PreviewRenderedValue = value;
     return true;
   }
 
@@ -242,8 +238,7 @@ function readableStringWidget(source) {
 
 function isLiveStringSource(info) {
   if (!info?.source) return false;
-  const type = nodeType(info.source);
-  if (!LIVE_STRING_SOURCE_TYPES.has(type)) return false;
+  if (!LIVE_STRING_SOURCE_TYPES.has(nodeType(info.source))) return false;
 
   const outputType = String(
     info.source?.outputs?.[info.sourceSlot]?.type
@@ -270,6 +265,91 @@ function directSourceText(node) {
   } catch {}
 
   return null;
+}
+
+function unwrapPreviewText(output) {
+  const candidates = [
+    output?.text,
+    output?.output?.text,
+    output?.ui?.text,
+    output?.value,
+    output?.output?.value,
+    output?.ui?.value,
+    output?.terry_h3_preview_text,
+    output?.output?.terry_h3_preview_text,
+    output?.ui?.terry_h3_preview_text,
+  ];
+
+  let value = candidates.find((item) => item != null);
+  if (value == null) return null;
+
+  while (Array.isArray(value) && value.length === 1) value = value[0];
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+  if (typeof value === "object") {
+    if (typeof value.text === "string") return value.text;
+    if (typeof value.value === "string") return value.value;
+  }
+
+  return null;
+}
+
+function nodeOutputRecords(node) {
+  const outputs = app?.nodeOutputs || {};
+  const records = [];
+  const seen = new Set();
+
+  const add = (executionId) => {
+    const id = String(executionId ?? "");
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    const output = outputs[id];
+    if (output == null) return;
+    records.push({ id, output, text: unwrapPreviewText(output) });
+  };
+
+  add(node?.__terryH3LastExecutionId);
+  add(node?.id);
+
+  const localId = String(node?.id ?? "");
+  if (localId) {
+    for (const id of Object.keys(outputs)) {
+      if (!id.endsWith(`:${localId}`)) continue;
+      if (executionNodeById(id) === node) add(id);
+    }
+  }
+
+  return records;
+}
+
+function cachedPreviewText(node) {
+  for (const record of nodeOutputRecords(node)) {
+    if (record.text == null) continue;
+
+    // If the source connection just changed, ignore the exact output object
+    // that was already cached before the change. A newly executed node replaces
+    // that entry; this prevents a stale preview from immediately reappearing.
+    const baseline = node?.__terryH3OutputBaseline;
+    if (
+      baseline
+      && !node.__terryH3ExecutedSinceSourceChange
+      && baseline.id === record.id
+      && baseline.output === record.output
+    ) continue;
+
+    return record.text;
+  }
+  return null;
+}
+
+function rememberOutputBaseline(node) {
+  const record = nodeOutputRecords(node).find((item) => item.text != null) || null;
+  node.__terryH3OutputBaseline = record
+    ? { id: record.id, output: record.output }
+    : null;
+  node.__terryH3ExecutedSinceSourceChange = false;
 }
 
 function notifyPreviewTargets(widget) {
@@ -301,36 +381,6 @@ function watchConnectedSource(node) {
   const notify = () => queueMicrotask(() => notifyPreviewTargets(widget));
   element?.addEventListener?.("input", notify, true);
   element?.addEventListener?.("change", notify, true);
-}
-
-function unwrapPreviewText(output) {
-  const candidates = [
-    output?.text,
-    output?.output?.text,
-    output?.ui?.text,
-    output?.value,
-    output?.output?.value,
-    output?.ui?.value,
-    output?.terry_h3_preview_text,
-    output?.output?.terry_h3_preview_text,
-    output?.ui?.terry_h3_preview_text,
-  ];
-
-  let value = candidates.find((item) => item != null);
-  if (value == null) return null;
-
-  while (Array.isArray(value) && value.length === 1) value = value[0];
-
-  if (typeof value === "string") return value;
-  if (value == null) return "";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-
-  if (typeof value === "object") {
-    if (typeof value.text === "string") return value.text;
-    if (typeof value.value === "string") return value.value;
-  }
-
-  return null;
 }
 
 function applyReadOnlyDom(node) {
@@ -415,13 +465,20 @@ function enterReadOnly(node) {
     const direct = directSourceText(node);
     if (direct != null) {
       node.__terryH3LastPreviewText = direct;
-      setEditorValue(node, direct);
+      if (node.__terryH3PreviewRenderedValue !== direct) setEditorValue(node, direct);
     }
-  } else if (node.__terryH3LastPreviewText != null) {
-    // Runtime STRING/TEXT sources are never guessed from their widgets. Once H3
-    // executes, only its actual PreviewText result is allowed to populate the
-    // editor, and periodic sync simply preserves that last execution result.
-    setEditorValue(node, node.__terryH3LastPreviewText);
+  } else {
+    // Runtime sources use the H3 node's own actual execution output. First try
+    // the event-fed value, then ComfyUI's official node output store. The store
+    // is populated by the stock executed handler even if our extension hook was
+    // registered too early/late or another extension replaced onExecuted.
+    const executedText = node.__terryH3LastPreviewText ?? cachedPreviewText(node);
+    if (executedText != null) {
+      node.__terryH3LastPreviewText = String(executedText);
+      if (node.__terryH3PreviewRenderedValue !== String(executedText)) {
+        setEditorValue(node, executedText);
+      }
+    }
   }
 
   applyReadOnlyDom(node);
@@ -436,6 +493,10 @@ function leaveReadOnly(node) {
 
   node.__terryH3ReadOnlyActive = false;
   node.__terryH3LastPreviewText = null;
+  node.__terryH3LastExecutionId = null;
+  node.__terryH3ExecutedSinceSourceChange = false;
+  node.__terryH3OutputBaseline = null;
+  node.__terryH3PreviewRenderedValue = null;
   if (hadSaved) delete props[LOCAL_PROMPT_PROP];
   setEditorValue(node, local);
   applyReadOnlyDom(node);
@@ -481,8 +542,19 @@ function patchNodeType(nodeTypeClass) {
   };
 
   const oldConnectionsChange = nodeTypeClass.prototype.onConnectionsChange;
-  nodeTypeClass.prototype.onConnectionsChange = function() {
+  nodeTypeClass.prototype.onConnectionsChange = function(type, index, connected, linkInfo) {
+    const beforeConnected = sourceConnected(this);
     const result = oldConnectionsChange?.apply(this, arguments);
+    const afterConnected = sourceConnected(this);
+    const changedInput = String(this.inputs?.[Number(index)]?.name || "") === SOURCE_INPUT;
+
+    if (changedInput || beforeConnected !== afterConnected) {
+      this.__terryH3LastPreviewText = null;
+      this.__terryH3LastExecutionId = null;
+      this.__terryH3PreviewRenderedValue = null;
+      rememberOutputBaseline(this);
+    }
+
     syncModeSoon(this);
     return result;
   };
@@ -490,6 +562,7 @@ function patchNodeType(nodeTypeClass) {
   const oldConfigure = nodeTypeClass.prototype.onConfigure;
   nodeTypeClass.prototype.onConfigure = function() {
     const result = oldConfigure?.apply(this, arguments);
+    rememberOutputBaseline(this);
     syncModeSoon(this);
     return result;
   };
@@ -497,6 +570,7 @@ function patchNodeType(nodeTypeClass) {
   const oldExecuted = nodeTypeClass.prototype.onExecuted;
   nodeTypeClass.prototype.onExecuted = function(output) {
     const result = oldExecuted?.apply(this, arguments);
+    this.__terryH3ExecutedSinceSourceChange = true;
     applyPreviewOutput(this, output);
     syncModeSoon(this);
     return result;
@@ -504,18 +578,17 @@ function patchNodeType(nodeTypeClass) {
 }
 
 function installExecutedListener() {
-  if (globalThis.__terryH3PreviewExecutedListener) return;
-  globalThis.__terryH3PreviewExecutedListener = true;
+  if (globalThis.__terryH3PreviewExecutedListenerV2) return;
+  globalThis.__terryH3PreviewExecutedListenerV2 = true;
 
   api.addEventListener?.("executed", (event) => {
     const detail = event?.detail || {};
-
-    // Match ComfyUI's own UI-node routing. display_node is the visible node for
-    // flattened/subgraph execution and therefore takes precedence over node.
     const executionId = detail.display_node || detail.node || detail.node_id;
     const node = executionNodeById(executionId);
     if (!node || !isTarget(node)) return;
 
+    node.__terryH3LastExecutionId = String(executionId ?? "");
+    node.__terryH3ExecutedSinceSourceChange = true;
     applyPreviewOutput(node, detail.output || detail);
     syncModeSoon(node);
   });
@@ -559,7 +632,10 @@ app.registerExtension({
     if (isTarget(node)) syncModeSoon(node);
   },
   loadedGraphNode(node) {
-    if (isTarget(node)) syncModeSoon(node);
+    if (isTarget(node)) {
+      rememberOutputBaseline(node);
+      syncModeSoon(node);
+    }
   },
   afterConfigureGraph() {
     installExecutedListener();
