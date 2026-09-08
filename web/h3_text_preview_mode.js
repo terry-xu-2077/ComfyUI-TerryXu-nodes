@@ -6,6 +6,16 @@ const SOURCE_INPUT = "source_text";
 const LOCAL_PROMPT_PROP = "terry_h3_local_prompt_before_preview";
 const READONLY_CLASS = "terry-h3-readonly-preview";
 
+// Only these nodes are safe to read directly in the frontend. Their STRING
+// output is literally the value of their own widget, so no backend execution is
+// required to know the result. Every other STRING/TEXT source is treated as a
+// runtime source and may update H3 only through an executed result.
+const LIVE_STRING_SOURCE_TYPES = new Set([
+  "PrimitiveString",
+  "PrimitiveStringMultiline",
+  "PrimitiveNode",
+]);
+
 function isTarget(node) {
   if (!node) return false;
   return [
@@ -15,6 +25,17 @@ function isTarget(node) {
     node.constructor?.comfyClass,
     node.constructor?.nodeData?.name,
   ].some((value) => String(value || "") === NODE_ID);
+}
+
+function nodeType(node) {
+  return String(
+    node?.comfyClass
+      || node?.type
+      || node?.constructor?.type
+      || node?.constructor?.comfyClass
+      || node?.constructor?.nodeData?.name
+      || ""
+  );
 }
 
 function promptWidget(node) {
@@ -42,6 +63,7 @@ function allGraphs(root = app.graph?.rootGraph || app.graph) {
   const result = [];
   const seen = new Set();
   const queue = [root];
+
   while (queue.length) {
     const graph = queue.shift();
     if (!graph || seen.has(graph)) continue;
@@ -51,6 +73,7 @@ function allGraphs(root = app.graph?.rootGraph || app.graph) {
     for (const node of graph?._nodes || graph?.nodes || []) {
       if (node?.subgraph && !seen.has(node.subgraph)) queue.push(node.subgraph);
     }
+
     for (const collection of [graph?.subgraphs, graph?._subgraphs]) {
       if (!collection) continue;
       const values = typeof collection.values === "function"
@@ -62,6 +85,7 @@ function allGraphs(root = app.graph?.rootGraph || app.graph) {
       }
     }
   }
+
   return result;
 }
 
@@ -97,16 +121,20 @@ function connectedSource(node) {
 
   let source = null;
   let sourceSlot = 0;
+
   try {
     const resolved = link.resolve?.(graph);
     source = resolved?.outputNode || resolved?.originNode || null;
-    if (resolved?.output) sourceSlot = Number(source?.outputs?.indexOf?.(resolved.output)) || 0;
+    if (resolved?.output) {
+      sourceSlot = Number(source?.outputs?.indexOf?.(resolved.output)) || 0;
+    }
   } catch {}
 
   const sourceId = link.origin_id ?? link.originId ?? link.from_id ?? link.fromId;
   sourceSlot = Number(
     link.origin_slot ?? link.originSlot ?? link.from_slot ?? link.fromSlot ?? sourceSlot
   ) || 0;
+
   source ||= link.origin_node
     || link.originNode
     || link.fromNode
@@ -129,9 +157,11 @@ function executionNodeById(nodeId) {
 
   const parts = raw.split(":").filter(Boolean);
   let graph = app.graph?.rootGraph || app.graph;
+
   for (let index = 0; graph && index < parts.length - 1; index++) {
     graph = graphNode(graph, parts[index])?.subgraph || null;
   }
+
   if (graph && parts.length) {
     const exact = graphNode(graph, parts[parts.length - 1]);
     if (exact) return exact;
@@ -168,9 +198,9 @@ function setEditorValue(node, text) {
   const value = String(text ?? "");
   setPromptWidgetValue(node, value);
 
-  // ComfyUI DOMWidgetImpl has no public setValue() method. Its official write
-  // path is the `value` property setter, which forwards to options.setValue().
-  // h3_prompt_editor.js registered its rich renderer through that option.
+  // ComfyUI DOMWidgetImpl writes through its `value` property. The H3 editor
+  // registered options.setValue(), so assigning value reuses the original rich
+  // renderer instead of creating a second rendering path here.
   const domWidget = node?.__terryH3DomWidget;
   if (domWidget) {
     try {
@@ -185,13 +215,14 @@ function setEditorValue(node, text) {
     } catch {}
   }
 
-  // During graph restore the rich editor may be created one tick later. Keep
-  // the hidden prompt correct; H3 initialization will render it when available.
+  // Graph restoration can create the rich DOM editor one tick later. Preserve
+  // the canonical hidden prompt now; normal H3 initialization will render it.
   const editor = node?.__terryH3Editor;
   if (editor && !editor.hasChildNodes()) {
     editor.textContent = value;
     return true;
   }
+
   return false;
 }
 
@@ -200,27 +231,35 @@ function readableStringWidget(source) {
   const preferred = ["value", "text", "string", "prompt", "content"];
 
   for (const name of preferred) {
-    const widget = widgets.find((item) => String(item?.name || "").toLowerCase() === name);
+    const widget = widgets.find(
+      (item) => String(item?.name || "").toLowerCase() === name
+    );
     if (widget && typeof widget.value === "string") return widget;
   }
+
   return widgets.find((widget) => typeof widget?.value === "string") || null;
 }
 
-function directSourceText(node) {
-  const info = connectedSource(node);
-  if (!info) return null;
+function isLiveStringSource(info) {
+  if (!info?.source) return false;
+  const type = nodeType(info.source);
+  if (!LIVE_STRING_SOURCE_TYPES.has(type)) return false;
 
   const outputType = String(
     info.source?.outputs?.[info.sourceSlot]?.type
       || info.link?.type
       || ""
   ).toUpperCase();
-  if (
-    outputType
-    && !outputType.includes("STRING")
-    && !outputType.includes("TEXT")
-    && outputType !== "*"
-  ) return null;
+
+  return !outputType
+    || outputType.includes("STRING")
+    || outputType.includes("TEXT")
+    || outputType === "*";
+}
+
+function directSourceText(node) {
+  const info = connectedSource(node);
+  if (!isLiveStringSource(info)) return null;
 
   const widget = readableStringWidget(info.source);
   if (widget) return String(widget.value ?? "");
@@ -241,7 +280,7 @@ function notifyPreviewTargets(widget) {
 
 function watchConnectedSource(node) {
   const info = connectedSource(node);
-  if (!info?.source) return;
+  if (!isLiveStringSource(info)) return;
 
   const widget = readableStringWidget(info.source);
   if (!widget) return;
@@ -276,17 +315,21 @@ function unwrapPreviewText(output) {
     output?.output?.terry_h3_preview_text,
     output?.ui?.terry_h3_preview_text,
   ];
+
   let value = candidates.find((item) => item != null);
   if (value == null) return null;
 
   while (Array.isArray(value) && value.length === 1) value = value[0];
+
   if (typeof value === "string") return value;
   if (value == null) return "";
   if (typeof value === "number" || typeof value === "boolean") return String(value);
+
   if (typeof value === "object") {
     if (typeof value.text === "string") return value.text;
     if (typeof value.value === "string") return value.value;
   }
+
   return null;
 }
 
@@ -346,6 +389,7 @@ function installEditorGuard(node, editor) {
 
 function applyPreviewText(node, previewText) {
   if (!isTarget(node) || !sourceConnected(node) || previewText == null) return false;
+
   const text = String(previewText);
   rememberLocalPrompt(node);
   node.__terryH3ReadOnlyActive = true;
@@ -364,24 +408,31 @@ function applyPreviewOutput(node, output) {
 function enterReadOnly(node) {
   rememberLocalPrompt(node);
   node.__terryH3ReadOnlyActive = true;
-  watchConnectedSource(node);
 
-  // Primitive/static STRING nodes can be previewed immediately. Nodes whose
-  // text exists only after execution fall back to the last executed UI value.
-  const direct = directSourceText(node);
-  if (direct != null) {
-    node.__terryH3LastPreviewText = direct;
-    setEditorValue(node, direct);
+  const info = connectedSource(node);
+  if (isLiveStringSource(info)) {
+    watchConnectedSource(node);
+    const direct = directSourceText(node);
+    if (direct != null) {
+      node.__terryH3LastPreviewText = direct;
+      setEditorValue(node, direct);
+    }
   } else if (node.__terryH3LastPreviewText != null) {
+    // Runtime STRING/TEXT sources are never guessed from their widgets. Once H3
+    // executes, only its actual PreviewText result is allowed to populate the
+    // editor, and periodic sync simply preserves that last execution result.
     setEditorValue(node, node.__terryH3LastPreviewText);
   }
+
   applyReadOnlyDom(node);
 }
 
 function leaveReadOnly(node) {
   const props = ensureProperties(node);
   const hadSaved = Object.prototype.hasOwnProperty.call(props, LOCAL_PROMPT_PROP);
-  const local = hadSaved ? String(props[LOCAL_PROMPT_PROP] ?? "") : currentPrompt(node);
+  const local = hadSaved
+    ? String(props[LOCAL_PROMPT_PROP] ?? "")
+    : currentPrompt(node);
 
   node.__terryH3ReadOnlyActive = false;
   node.__terryH3LastPreviewText = null;
@@ -392,6 +443,7 @@ function leaveReadOnly(node) {
 
 function syncMode(node) {
   if (!isTarget(node)) return;
+
   if (sourceConnected(node)) {
     enterReadOnly(node);
   } else if (node.__terryH3ReadOnlyActive || hasSavedLocalPrompt(node)) {
@@ -399,6 +451,7 @@ function syncMode(node) {
   } else {
     applyReadOnlyDom(node);
   }
+
   node.setDirtyCanvas?.(true, true);
 }
 
@@ -456,17 +509,22 @@ function installExecutedListener() {
 
   api.addEventListener?.("executed", (event) => {
     const detail = event?.detail || {};
-    // Match ComfyUI's own executed handler: display_node is the UI-facing node
-    // for flattened/subgraph executions and must take precedence over node.
+
+    // Match ComfyUI's own UI-node routing. display_node is the visible node for
+    // flattened/subgraph execution and therefore takes precedence over node.
     const executionId = detail.display_node || detail.node || detail.node_id;
     const node = executionNodeById(executionId);
     if (!node || !isTarget(node)) return;
+
     applyPreviewOutput(node, detail.output || detail);
     syncModeSoon(node);
   });
 }
 
-if (typeof document !== "undefined" && !document.getElementById("terry-h3-readonly-preview-style")) {
+if (
+  typeof document !== "undefined"
+  && !document.getElementById("terry-h3-readonly-preview-style")
+) {
   const style = document.createElement("style");
   style.id = "terry-h3-readonly-preview-style";
   style.textContent = `
