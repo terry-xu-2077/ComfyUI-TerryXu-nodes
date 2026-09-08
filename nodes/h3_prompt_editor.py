@@ -6,7 +6,7 @@ from typing import Any
 
 import torch
 import folder_paths
-from comfy_api.latest import io, ui, Types
+from comfy_api.latest import io, Types
 
 
 def _kind(value: Any) -> str:
@@ -20,12 +20,7 @@ def _kind(value: Any) -> str:
 
 
 def _single_input(value: Any, default: Any = None) -> Any:
-    """Unwrap a normal input after Schema(is_input_list=True).
-
-    ComfyUI wraps every input in a list when a node opts into whole-list input
-    handling. H3 only needs whole-list semantics for media assets, so ordinary
-    widgets/text inputs keep their existing single-value behaviour.
-    """
+    """Unwrap a normal input after Schema(is_input_list=True)."""
     if isinstance(value, (list, tuple)):
         return value[0] if value else default
     return default if value is None else value
@@ -42,13 +37,7 @@ def _flatten_asset_values(value: Any):
 
 
 def _asset_items(assets: io.Autogrow.Type | None, asset_inputs: dict[str, Any]):
-    """Accept grouped/flattened Autogrow inputs and expand ComfyUI Lists.
-
-    With ``is_input_list=True`` each connected Autogrow transport input is a
-    Python list. A normal single IMAGE / VIDEO / AUDIO therefore arrives as a
-    one-item list, while an upstream OUTPUT_IS_LIST arrives as the complete
-    list. Both forms are flattened here into the same ordered asset stream.
-    """
+    """Accept grouped/flattened Autogrow inputs and expand ComfyUI Lists."""
     merged: dict[str, Any] = {}
     if isinstance(assets, dict):
         merged.update(assets)
@@ -69,7 +58,7 @@ def _asset_items(assets: io.Autogrow.Type | None, asset_inputs: dict[str, Any]):
 
 
 class H3PromptEditor(io.ComfyNode):
-    """Visual MiniMax H3 prompt editor and read-only H3 text preview node."""
+    """Visual MiniMax H3 prompt editor with external-text follow/edit modes."""
 
     @classmethod
     def define_schema(cls):
@@ -83,8 +72,6 @@ class H3PromptEditor(io.ComfyNode):
                 ),
             ),
             prefix="asset",
-            # References are optional. The frontend only serializes hidden
-            # transport inputs for references that are actually connected.
             min=0,
         )
 
@@ -101,8 +88,8 @@ class H3PromptEditor(io.ComfyNode):
             search_aliases=["MiniMax H3", "H3 prompt", "H3 提示词", "reference prompt", "text preview"],
             description=(
                 "可视化编写 MiniMax H3 提示词；支持动态数量图片、视频、音频参考及 ComfyUI List 资产输入；"
-                "可连接外部 STRING / TEXT 作为只读 H3 预览；@ 插入媒体，/ 打开 H3 语法菜单；"
-                "输出始终为标准 H3 原文 STRING。"
+                "外部 STRING / TEXT 默认实时跟随，也可点击“编辑副本”转为本地修改；"
+                "@ 插入媒体，/ 打开 H3 语法菜单；输出始终为标准 H3 原文 STRING。"
             ),
             is_output_node=True,
             has_intermediate_output=True,
@@ -111,12 +98,19 @@ class H3PromptEditor(io.ComfyNode):
                 io.MatchType.Input(
                     "source_text",
                     template=text_input_type,
-                    display_name="文本输入 · 只读预览",
+                    display_name="文本输入 · 跟随/编辑",
                     optional=True,
                     tooltip=(
-                        "可连接 STRING 或 TEXT。连接后编辑区自动切换为只读预览；"
-                        "标签格式化、中文标签、媒体缩略图及可视化/原文切换继续正常工作。"
+                        "可连接 STRING 或 TEXT。默认跟随上游文本；点击编辑器内“编辑副本”后，"
+                        "保留连线但使用本地编辑内容；“同步最新”可恢复到上游最近一次结果。"
                     ),
+                ),
+                io.Boolean.Input(
+                    "edit_mode",
+                    display_name="编辑副本",
+                    default=False,
+                    socketless=True,
+                    tooltip="内部状态：关闭时跟随 source_text；开启时使用本地 prompt。",
                 ),
                 io.Boolean.Input(
                     "visual_preview",
@@ -135,21 +129,21 @@ class H3PromptEditor(io.ComfyNode):
         cls,
         prompt: Any,
         source_text: Any | None = None,
+        edit_mode: Any = False,
         visual_preview: Any = True,
         assets: io.Autogrow.Type | None = None,
         **asset_inputs,
     ) -> io.NodeOutput:
-        # is_input_list=True is enabled so the asset ports can receive complete
-        # ComfyUI Lists. Keep all non-asset controls backward-compatible by
-        # unwrapping their normal one-item execution lists here.
         prompt_value = _single_input(prompt, "")
         source_value = _single_input(source_text, None)
-        _single_input(visual_preview, True)  # Normalize for compatibility; UI owns preview mode.
+        edit_value = bool(_single_input(edit_mode, False))
+        _single_input(visual_preview, True)
 
-        # A connected STRING or TEXT turns the node into a read-only
-        # preview/pass-through node. An intentionally empty upstream value must
-        # remain empty, so only None means "not connected / no value supplied".
-        effective_prompt = str(source_value) if source_value is not None else str(prompt_value or "")
+        source_string = str(source_value) if source_value is not None else None
+        if edit_value or source_string is None:
+            effective_prompt = str(prompt_value or "")
+        else:
+            effective_prompt = source_string
 
         counts = {"picture": 0, "video": 0, "audio": 0, "other": 0}
         result = []
@@ -169,6 +163,8 @@ class H3PromptEditor(io.ComfyNode):
 
             try:
                 if kind == "picture":
+                    from comfy_api.latest import ui
+
                     saved = ui.ImageSaveHelper.save_images(
                         value[:1],
                         filename_prefix=f".terry_h3/{uuid.uuid4().hex}",
@@ -206,5 +202,8 @@ class H3PromptEditor(io.ComfyNode):
 
         return io.NodeOutput(
             effective_prompt,
-            ui=ui.PreviewText(effective_prompt),
+            ui={
+                "text": [effective_prompt],
+                "terry_h3_source_text": [source_string],
+            },
         )
