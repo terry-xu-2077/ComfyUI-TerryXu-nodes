@@ -206,8 +206,5 @@ class H3PromptEditor(io.ComfyNode):
 
         return io.NodeOutput(
             effective_prompt,
-            ui={
-                "terry_h3_assets": result,
-                "text": (effective_prompt,),
-            },
+            ui=ui.PreviewText(effective_prompt),
         )

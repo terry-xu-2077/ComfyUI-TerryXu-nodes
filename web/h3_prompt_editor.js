@@ -453,6 +453,35 @@ function appendRawEditor(editor, raw) {
   renderH3RawText(editor, raw);
 }
 
+function sourceTextConnected(node) {
+  const input = node?.inputs?.find((slot) => String(slot?.name || "") === "source_text");
+  return Boolean(input && (input.link != null || (Array.isArray(input.links) && input.links.length)));
+}
+
+function executedPreviewText(message) {
+  let value = message?.text;
+  while (Array.isArray(value) && value.length === 1) value = value[0];
+  if (Array.isArray(value)) return value.map((item) => String(item ?? "")).join("\n\n");
+  if (value == null) return null;
+  return String(value);
+}
+
+function applyExecutedTextPreview(node, message) {
+  if (!sourceTextConnected(node)) return false;
+  const text = executedPreviewText(message);
+  if (text == null) return false;
+  node.__terryH3LastPreviewText = text;
+  setRaw(node, text, false);
+  if (node.__terryH3DomWidget && typeof node.__terryH3DomWidget.setValue === "function") {
+    node.__terryH3DomWidget.setValue(text);
+  } else {
+    refreshEditor(node, true);
+  }
+  node.setDirtyCanvas?.(true, true);
+  node.graph?.setDirtyCanvas?.(true, true);
+  return true;
+}
+
 function parsePasted(node, editor, text) {
   return insertH3RichTextAtSelection(editor, text, richOptions(node));
 }
@@ -595,6 +624,12 @@ function installNode(nodeType, nodeData) {
   nodeType.prototype.onDrawForeground = function() {
     const r = draw?.apply(this, arguments);
     if (!this.__terryH3Editor) installEditorSoon(this);
+    return r;
+  };
+  const executed = nodeType.prototype.onExecuted;
+  nodeType.prototype.onExecuted = function(message) {
+    const r = executed?.apply(this, arguments);
+    applyExecutedTextPreview(this, message);
     return r;
   };
   const serialize = nodeType.prototype.onSerialize;
