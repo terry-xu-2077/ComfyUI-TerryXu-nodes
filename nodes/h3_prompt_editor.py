@@ -106,17 +106,17 @@ class H3PromptEditor(io.ComfyNode):
                     ),
                 ),
                 io.Boolean.Input(
+                    "visual_preview",
+                    display_name="可视化预览",
+                    default=True,
+                    tooltip="开启：标签可视化；关闭：显示纯文本 H3 原文。",
+                ),
+                io.Boolean.Input(
                     "edit_mode",
                     display_name="编辑副本",
                     default=False,
                     socketless=True,
                     tooltip="内部状态：关闭时跟随 source_text；开启时使用本地 prompt。",
-                ),
-                io.Boolean.Input(
-                    "visual_preview",
-                    display_name="可视化预览",
-                    default=True,
-                    tooltip="开启：标签可视化；关闭：显示纯文本 H3 原文。",
                 ),
                 io.Autogrow.Input("assets", template=asset_template),
             ],
@@ -129,15 +129,15 @@ class H3PromptEditor(io.ComfyNode):
         cls,
         prompt: Any,
         source_text: Any | None = None,
-        edit_mode: Any = False,
         visual_preview: Any = True,
+        edit_mode: Any = False,
         assets: io.Autogrow.Type | None = None,
         **asset_inputs,
     ) -> io.NodeOutput:
         prompt_value = _single_input(prompt, "")
         source_value = _single_input(source_text, None)
-        edit_value = bool(_single_input(edit_mode, False))
         _single_input(visual_preview, True)
+        edit_value = bool(_single_input(edit_mode, False))
 
         source_string = str(source_value) if source_value is not None else None
         if edit_value or source_string is None:
