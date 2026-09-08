@@ -59,11 +59,38 @@ function savedGroups(node) {
   return node.properties[STATE_PROPERTY];
 }
 
+function groupKeys(node) {
+  return savedGroups(node).map((entry, index) => String(
+    entry?.key || `${entry?.graphId ?? ""}:${entry?.groupId ?? ""}:${entry?.title ?? ""}:${index}`
+  ));
+}
+
+function removedGroupIndex(previous, current) {
+  if (!Array.isArray(previous) || previous.length <= current.length) return -1;
+  for (let index = 0; index < current.length; index++) {
+    if (previous[index] === current[index]) continue;
+    const tailMatches = current.slice(index).every((key, offset) => previous[index + 1 + offset] === key);
+    if (tailMatches) return index;
+    break;
+  }
+  return current.length;
+}
+
 function ensureInputs(node) {
   if (!isManager(node)) return;
-  const desired = savedGroups(node).length;
+  const keys = groupKeys(node);
+  const desired = keys.length;
+  let previous = Array.isArray(node.__terryExternalBoolKeys) ? [...node.__terryExternalBoolKeys] : null;
   node.__terryExternalBoolSyncing = true;
   try {
+    // When a row is deleted from the middle, remove that exact socket so the
+    // external wires belonging to later rows stay aligned with their groups.
+    while (previous && previous.length > desired && (node.inputs?.length || 0) > desired) {
+      const index = Math.max(0, removedGroupIndex(previous, keys));
+      if (typeof node.removeInput === "function") node.removeInput(index);
+      else node.inputs.splice(index, 1);
+      previous.splice(index, 1);
+    }
     while ((node.inputs?.length || 0) > desired) {
       const index = node.inputs.length - 1;
       if (typeof node.removeInput === "function") node.removeInput(index);
@@ -81,6 +108,7 @@ function ensureInputs(node) {
       slot.nameLocked = true;
       slot.__terryGroupExternalBoolean = true;
     }
+    node.__terryExternalBoolKeys = keys;
   } finally {
     node.__terryExternalBoolSyncing = false;
   }
