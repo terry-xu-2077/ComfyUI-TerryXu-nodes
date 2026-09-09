@@ -9,7 +9,10 @@ from .nodes import (
     RemoteControl,
 )
 
-WEB_DIRECTORY = "./web"
+# Only web/modules/index.js is auto-loaded by ComfyUI. The remaining frontend
+# implementation files use .mjs and are imported explicitly by index.js so
+# initialization order never depends on filenames such as zz/zzz.
+WEB_DIRECTORY = "./web/modules"
 
 
 class TerryXuExtension(ComfyExtension):
