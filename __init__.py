@@ -6,26 +6,23 @@ from .nodes import (
     BoolSwitch,
     H3PromptEditor,
     LineSwitch,
+    RemoteControl,
 )
 
 WEB_DIRECTORY = "./web"
 
 
 class TerryXuExtension(ComfyExtension):
-    """
-    TerryXu root extension.
-
-    Future custom nodes should be imported from ./nodes and appended to
-    get_node_list(), so the whole toolset remains one installable package.
-    """
+    """TerryXu custom nodes extension."""
 
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
             H3PromptEditor,
-                    LineSwitch,
+            LineSwitch,
             BoolSwitch,
             BooleanSwitch,
+            RemoteControl,
         ]
 
 
