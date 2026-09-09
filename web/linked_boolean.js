@@ -407,6 +407,9 @@ function updateUi(node) {
   ui.list.replaceChildren();
   for (const record of records) {
     if (!record.name) continue;
+    // A creator already owns this channel; offering its own channel back in the
+    // picker is redundant and makes the menu look like a selectable target.
+    if (record.owner === node) continue;
     const option = document.createElement("option");
     option.value = record.name;
     option.label = record.id === currentId ? record.name : `${record.name} · ${record.members.length}`;
