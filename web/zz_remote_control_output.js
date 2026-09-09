@@ -150,8 +150,9 @@ function ensureOutput(node) {
 
 function setPayload(node, payload) {
   const valueWidget = hidePayloadWidget(node);
-  if (!valueWidget) return;
-  if (valueWidget.value !== payload) valueWidget.value = payload;
+  if (!valueWidget || valueWidget.value === payload) return false;
+  valueWidget.value = payload;
+  return true;
 }
 
 function syncRemoteOutput(node) {
@@ -159,29 +160,34 @@ function syncRemoteOutput(node) {
   forceExecutable(node);
   const target = targetForRemote(node);
   const kind = remoteKind(target);
+  const hadOutput = Boolean(node.outputs?.length);
   const output = ensureOutput(node);
   if (!output) return;
 
+  let payload = "i:1";
+  let type = "*";
+  let label = isChinese() ? "控制值" : "Value";
   if (kind === "int") {
-    const value = remoteValue(node, target, kind);
-    setPayload(node, `i:${value}`);
-    output.type = "INT";
-    output.label = isChinese() ? "整数" : "Integer";
+    payload = `i:${remoteValue(node, target, kind)}`;
+    type = "INT";
+    label = isChinese() ? "整数" : "Integer";
   } else if (kind === "bool") {
-    const value = remoteValue(node, target, kind);
-    setPayload(node, `b:${value ? 1 : 0}`);
-    output.type = "BOOLEAN";
-    output.label = isChinese() ? "布尔" : "Boolean";
-  } else {
-    setPayload(node, "i:1");
-    output.type = "*";
-    output.label = isChinese() ? "控制值" : "Value";
+    payload = `b:${remoteValue(node, target, kind) ? 1 : 0}`;
+    type = "BOOLEAN";
+    label = isChinese() ? "布尔" : "Boolean";
   }
 
+  let changed = !hadOutput;
+  changed = setPayload(node, payload) || changed;
+  if (output.type !== type) { output.type = type; changed = true; }
+  if (output.label !== label) { output.label = label; changed = true; }
   node.serialize_widgets = true;
-  node.graph?.change?.();
-  node.graph?.setDirtyCanvas?.(true, true);
-  node.setDirtyCanvas?.(true, true);
+
+  if (changed) {
+    node.graph?.change?.();
+    node.graph?.setDirtyCanvas?.(true, true);
+    node.setDirtyCanvas?.(true, true);
+  }
 }
 
 function executableRemoteDef() {
