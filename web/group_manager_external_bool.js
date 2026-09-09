@@ -8,6 +8,8 @@ const ROW_HEIGHT = 28;
 const ROW_GAP = 3;
 const PANEL_PADDING = 8;
 const NODE_MIN_WIDTH = 240;
+const CLASSIC_BOTTOM_GAP = 12;
+const CLASSIC_MAX_TOP_OFFSET = 48;
 const STYLE_ID = "terry-group-manager-external-bool-style";
 
 let timer = null;
@@ -90,9 +92,23 @@ function expectedPanelHeight(node) {
   return (count + 1) * ROW_HEIGHT + count * ROW_GAP + PANEL_PADDING * 2;
 }
 
-function normalizeManagerSize(node) {
+function widgetTopOffset(node) {
+  const ref = node.__terryGroupManager?.widget;
+  for (const candidate of [ref?.last_y, ref?.y]) {
+    const value = Number(candidate);
+    if (Number.isFinite(value)) return Math.max(0, Math.min(value, CLASSIC_MAX_TOP_OFFSET));
+  }
+  return 0;
+}
+
+function normalizeClassicSize(node, panel = null) {
+  if (isVueNodesMode()) return;
   const width = Math.max(NODE_MIN_WIDTH, Number(node.size?.[0]) || NODE_MIN_WIDTH);
-  const height = expectedPanelHeight(node);
+  const measuredPanelHeight = Number(panel?.offsetHeight);
+  const panelHeight = Number.isFinite(measuredPanelHeight) && measuredPanelHeight > 0
+    ? Math.max(expectedPanelHeight(node), measuredPanelHeight)
+    : expectedPanelHeight(node);
+  const height = widgetTopOffset(node) + panelHeight + CLASSIC_BOTTOM_GAP;
   if (Math.abs(Number(node.size?.[0]) - width) > 0.5 || Math.abs(Number(node.size?.[1]) - height) > 0.5) {
     node.setSize?.([width, height]);
     node.graph?.setDirtyCanvas?.(true, true);
@@ -113,7 +129,6 @@ function syncWidgetAnchor(node) {
   state.mode = mode;
   node.widgets_start_y = desired;
   try { node.arrange?.(); } catch {}
-  normalizeManagerSize(node);
 }
 
 function ensureInputs(node) {
@@ -124,8 +139,6 @@ function ensureInputs(node) {
   let previous = Array.isArray(node.__terryExternalBoolKeys) ? [...node.__terryExternalBoolKeys] : null;
   node.__terryExternalBoolSyncing = true;
   try {
-    // When a row is deleted from the middle, remove that exact socket so the
-    // external wires belonging to later rows stay aligned with their groups.
     while (previous && previous.length > desired && (node.inputs?.length || 0) > desired) {
       const index = Math.max(0, removedGroupIndex(previous, keys));
       if (typeof node.removeInput === "function") node.removeInput(index);
@@ -153,7 +166,6 @@ function ensureInputs(node) {
   } finally {
     node.__terryExternalBoolSyncing = false;
   }
-  normalizeManagerSize(node);
 }
 
 function linkById(graph, id) {
@@ -171,12 +183,8 @@ function linkById(graph, id) {
     }
     if (Array.isArray(link)) {
       return {
-        id: link[0],
-        origin_id: link[1],
-        origin_slot: link[2],
-        target_id: link[3],
-        target_slot: link[4],
-        type: link[5],
+        id: link[0], origin_id: link[1], origin_slot: link[2],
+        target_id: link[3], target_slot: link[4], type: link[5],
       };
     }
     if (link) return link;
@@ -209,7 +217,6 @@ function booleanValueFromSource(source, outputSlot = 0) {
   if (nodeType(source) === BOOLEAN_SOURCE_TYPE && enabled?.value !== undefined) {
     return { readable: true, value: Boolean(enabled.value) };
   }
-
   const output = source.outputs?.[Number(outputSlot) || 0];
   if (String(output?.type || "").toUpperCase() !== "BOOLEAN") return { readable: false, value: false };
   if (enabled?.value !== undefined && typeof enabled.value === "boolean") {
@@ -222,10 +229,12 @@ function booleanValueFromSource(source, outputSlot = 0) {
 
 function externalControl(node, index) {
   const slot = node.inputs?.[index];
-  if (!slot || slot.link == null) return { connected: false, readable: false, value: false };
+  if (!slot) return { connected: false, readable: false, value: false };
   const graph = node.graph || app.graph;
-  const link = linkById(graph, slot.link);
-  if (!link) return { connected: true, readable: false, value: false };
+  let link = null;
+  try { link = node.getInputLink?.(index) || null; } catch {}
+  if (!link && slot.link != null) link = linkById(graph, slot.link);
+  if (!link) return { connected: false, readable: false, value: false };
   const source = nodeById(graph, link.origin_id);
   const state = booleanValueFromSource(source, link.origin_slot);
   return { connected: true, readable: state.readable, value: state.value };
@@ -253,17 +262,18 @@ function setSlotPos(slot, x, y) {
   }
 }
 
-function syncClassicSlotPositions(node) {
+function syncClassicSlotPositions(node, panel) {
   syncWidgetAnchor(node);
-  const widgetRef = node.__terryGroupManager?.widget;
-  const widgetY = Number(widgetRef?.y);
-  const base = Number.isFinite(widgetY)
-    ? widgetY
-    : (Number(node.widgets_start_y) || 0) + 2;
+  const base = widgetTopOffset(node);
+  const rows = panel ? [...panel.querySelectorAll(".terry-group-manager__row")] : [];
   for (const [index, slot] of (node.inputs || []).entries()) {
-    const y = base + PANEL_PADDING + ROW_HEIGHT / 2 + index * (ROW_HEIGHT + ROW_GAP);
-    setSlotPos(slot, 0, y);
+    const row = rows[index];
+    const rowY = row && Number(row.offsetHeight) > 0
+      ? Number(row.offsetTop || 0) + Number(row.offsetHeight) / 2
+      : PANEL_PADDING + ROW_HEIGHT / 2 + index * (ROW_HEIGHT + ROW_GAP);
+    setSlotPos(slot, 0, base + rowY);
   }
+  normalizeClassicSize(node, panel);
   node.setDirtyCanvas?.(true, true);
 }
 
@@ -276,6 +286,17 @@ function ensureGuideLayer(root) {
     root.append(layer);
   }
   return layer;
+}
+
+function elementScale(root, rect) {
+  const width = Number(root?.offsetWidth);
+  const height = Number(root?.offsetHeight);
+  let x = width > 0 ? Number(rect?.width) / width : NaN;
+  let y = height > 0 ? Number(rect?.height) / height : NaN;
+  const fallback = Number(app.canvas?.ds?.scale) || 1;
+  if (!Number.isFinite(x) || x <= 0) x = fallback;
+  if (!Number.isFinite(y) || y <= 0) y = fallback;
+  return { x, y };
 }
 
 function syncNodes2SlotPositions(node, panel) {
@@ -297,6 +318,7 @@ function syncNodes2SlotPositions(node, panel) {
   });
 
   const rootRect = root.getBoundingClientRect();
+  const scale = elementScale(root, rootRect);
   const titleHeight = Number(globalThis.LiteGraph?.NODE_TITLE_HEIGHT) || 30;
   const layer = ensureGuideLayer(root);
   layer?.replaceChildren();
@@ -306,9 +328,9 @@ function syncNodes2SlotPositions(node, panel) {
     const slot = node.inputs?.[index];
     if (!row || !slot) return;
     const rect = row.getBoundingClientRect();
-    const rootY = rect.top + rect.height / 2 - rootRect.top;
+    const rootY = (rect.top + rect.height / 2 - rootRect.top) / scale.y;
     const localY = rootY - titleHeight;
-    const rowLeft = Math.max(6, rect.left - rootRect.left);
+    const rowLeft = Math.max(6, (rect.left - rootRect.left) / scale.x);
     setSlotPos(slot, 0, localY);
 
     slotElement.classList.add("terry-group-external-bool-slot");
@@ -379,12 +401,11 @@ function applyExternalStates(node) {
     }
   }
 
-  normalizeManagerSize(node);
   if (isVueNodesMode()) {
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => syncNodes2SlotPositions(node, panel));
     else queueMicrotask(() => syncNodes2SlotPositions(node, panel));
   } else {
-    syncClassicSlotPositions(node);
+    syncClassicSlotPositions(node, panel);
   }
 }
 
