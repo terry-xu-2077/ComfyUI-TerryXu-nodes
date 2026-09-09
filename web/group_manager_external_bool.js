@@ -4,6 +4,11 @@ const MANAGER_TYPE = "TerryXuGroupManager";
 const BOOLEAN_SOURCE_TYPE = "TerryXuBooleanSwitch";
 const STATE_PROPERTY = "terry_group_manager_groups";
 const POLL_MS = 180;
+const ROW_HEIGHT = 28;
+const ROW_GAP = 3;
+const PANEL_PADDING = 8;
+const NODE_MIN_WIDTH = 240;
+const STYLE_ID = "terry-group-manager-external-bool-style";
 
 let timer = null;
 
@@ -13,6 +18,10 @@ function nodeType(node) {
 
 function isManager(node) {
   return nodeType(node) === MANAGER_TYPE;
+}
+
+function isVueNodesMode() {
+  return Boolean(globalThis.LiteGraph?.vueNodesMode);
 }
 
 function widget(node, name) {
@@ -76,8 +85,40 @@ function removedGroupIndex(previous, current) {
   return current.length;
 }
 
+function expectedPanelHeight(node) {
+  const count = savedGroups(node).length;
+  return (count + 1) * ROW_HEIGHT + count * ROW_GAP + PANEL_PADDING * 2;
+}
+
+function normalizeManagerSize(node) {
+  const width = Math.max(NODE_MIN_WIDTH, Number(node.size?.[0]) || NODE_MIN_WIDTH);
+  const height = expectedPanelHeight(node);
+  if (Math.abs(Number(node.size?.[0]) - width) > 0.5 || Math.abs(Number(node.size?.[1]) - height) > 0.5) {
+    node.setSize?.([width, height]);
+    node.graph?.setDirtyCanvas?.(true, true);
+  }
+}
+
+function syncWidgetAnchor(node) {
+  if (!node.__terryExternalBoolWidgetAnchor) {
+    node.__terryExternalBoolWidgetAnchor = {
+      value: node.widgets_start_y,
+      mode: null,
+    };
+  }
+  const state = node.__terryExternalBoolWidgetAnchor;
+  const mode = isVueNodesMode() ? "vue" : "classic";
+  const desired = mode === "classic" ? 0 : state.value;
+  if (state.mode === mode && node.widgets_start_y === desired) return;
+  state.mode = mode;
+  node.widgets_start_y = desired;
+  try { node.arrange?.(); } catch {}
+  normalizeManagerSize(node);
+}
+
 function ensureInputs(node) {
   if (!isManager(node)) return;
+  syncWidgetAnchor(node);
   const keys = groupKeys(node);
   const desired = keys.length;
   let previous = Array.isArray(node.__terryExternalBoolKeys) ? [...node.__terryExternalBoolKeys] : null;
@@ -112,6 +153,7 @@ function ensureInputs(node) {
   } finally {
     node.__terryExternalBoolSyncing = false;
   }
+  normalizeManagerSize(node);
 }
 
 function linkById(graph, id) {
@@ -202,17 +244,38 @@ function managerPanel(node) {
     || null;
 }
 
-function syncClassicSlotPositions(node, panel) {
-  const widgetRef = node.__terryGroupManager?.widget;
-  const start = Number(widgetRef?.last_y);
-  const base = Number.isFinite(start) ? start : (Number(globalThis.LiteGraph?.NODE_TITLE_HEIGHT) || 30);
-  const rows = panel ? [...panel.querySelectorAll(".terry-group-manager__row")] : [];
-  for (const [index, slot] of (node.inputs || []).entries()) {
-    const y = rows[index]
-      ? base + Number(rows[index].offsetTop || 0) + Number(rows[index].offsetHeight || 28) / 2
-      : base + 22 + index * 31;
-    slot.pos = [0, y];
+function setSlotPos(slot, x, y) {
+  if (!slot || !Number.isFinite(x) || !Number.isFinite(y)) return;
+  if (!Array.isArray(slot.pos)) slot.pos = [x, y];
+  else {
+    slot.pos[0] = x;
+    slot.pos[1] = y;
   }
+}
+
+function syncClassicSlotPositions(node) {
+  syncWidgetAnchor(node);
+  const widgetRef = node.__terryGroupManager?.widget;
+  const widgetY = Number(widgetRef?.y);
+  const base = Number.isFinite(widgetY)
+    ? widgetY
+    : (Number(node.widgets_start_y) || 0) + 2;
+  for (const [index, slot] of (node.inputs || []).entries()) {
+    const y = base + PANEL_PADDING + ROW_HEIGHT / 2 + index * (ROW_HEIGHT + ROW_GAP);
+    setSlotPos(slot, 0, y);
+  }
+  node.setDirtyCanvas?.(true, true);
+}
+
+function ensureGuideLayer(root) {
+  if (!root) return null;
+  let layer = [...root.children].find((element) => element?.classList?.contains("terry-group-manager-bool-guides"));
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.className = "terry-group-manager-bool-guides";
+    root.append(layer);
+  }
+  return layer;
 }
 
 function syncNodes2SlotPositions(node, panel) {
@@ -220,7 +283,8 @@ function syncNodes2SlotPositions(node, panel) {
   if (!root || !panel) return;
   const count = savedGroups(node).length;
   const slotRows = [...root.querySelectorAll(".lg-slot--input")].slice(0, count);
-  if (!slotRows.length) return;
+  const rows = [...panel.querySelectorAll(".terry-group-manager__row")].slice(0, count);
+  if (!slotRows.length || !rows.length) return;
 
   const inputColumn = slotRows[0]?.parentElement;
   const wrapper = inputColumn?.parentElement;
@@ -233,17 +297,55 @@ function syncNodes2SlotPositions(node, panel) {
   });
 
   const rootRect = root.getBoundingClientRect();
-  const rows = [...panel.querySelectorAll(".terry-group-manager__row")];
+  const titleHeight = Number(globalThis.LiteGraph?.NODE_TITLE_HEIGHT) || 30;
+  const layer = ensureGuideLayer(root);
+  layer?.replaceChildren();
+
   slotRows.forEach((slotElement, index) => {
     const row = rows[index];
-    if (!row) return;
+    const slot = node.inputs?.[index];
+    if (!row || !slot) return;
     const rect = row.getBoundingClientRect();
-    const y = rect.top + rect.height / 2 - rootRect.top;
+    const rootY = rect.top + rect.height / 2 - rootRect.top;
+    const localY = rootY - titleHeight;
+    const rowLeft = Math.max(6, rect.left - rootRect.left);
+    setSlotPos(slot, 0, localY);
+
+    slotElement.classList.add("terry-group-external-bool-slot");
     Object.assign(slotElement.style, {
-      position: "absolute", left: "0", top: `${y - 6}px`, width: "14px", height: "12px",
+      position: "absolute", left: "0", top: `${rootY}px`, width: "14px", height: "12px",
       margin: "0", padding: "0", overflow: "visible", pointerEvents: "auto", zIndex: "46",
+      transform: "translateY(-50%)",
     });
+
+    if (layer) {
+      const guide = document.createElement("div");
+      guide.className = "terry-group-manager-bool-guide";
+      guide.style.top = `${rootY}px`;
+      guide.style.width = `${rowLeft}px`;
+      layer.append(guide);
+    }
   });
+  node.setDirtyCanvas?.(true, true);
+}
+
+function installStyle() {
+  if (typeof document === "undefined" || document.getElementById(STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = `
+.terry-group-manager__row[data-terry-boolean-input="true"]{
+  box-shadow:inset 2px 0 0 color-mix(in srgb,var(--p-primary-color,#83a3bb) 52%,transparent);
+}
+.terry-group-manager-bool-guides{
+  position:absolute;inset:0;overflow:visible;pointer-events:none;z-index:44;
+}
+.terry-group-manager-bool-guide{
+  position:absolute;left:0;height:0;border-top:1px solid color-mix(in srgb,var(--p-primary-color,#83a3bb) 54%,transparent);
+  transform:translateY(-.5px);pointer-events:none;
+}
+`;
+  document.head.append(style);
 }
 
 function applyExternalStates(node) {
@@ -252,6 +354,11 @@ function applyExternalStates(node) {
   if (!panel) return;
   const rows = [...panel.querySelectorAll(".terry-group-manager__row")];
   const count = savedGroups(node).length;
+
+  rows.forEach((row, index) => {
+    if (index < count) row.dataset.terryBooleanInput = "true";
+    else delete row.dataset.terryBooleanInput;
+  });
 
   for (let index = 0; index < count; index++) {
     const row = rows[index];
@@ -272,9 +379,25 @@ function applyExternalStates(node) {
     }
   }
 
-  syncClassicSlotPositions(node, panel);
-  if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => syncNodes2SlotPositions(node, panel));
-  else queueMicrotask(() => syncNodes2SlotPositions(node, panel));
+  normalizeManagerSize(node);
+  if (isVueNodesMode()) {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => syncNodes2SlotPositions(node, panel));
+    else queueMicrotask(() => syncNodes2SlotPositions(node, panel));
+  } else {
+    syncClassicSlotPositions(node);
+  }
+}
+
+function fixedInputPosition(node, slotIndex) {
+  const index = Number(slotIndex);
+  if (!Number.isInteger(index) || index < 0) return null;
+  const slot = node.inputs?.[index];
+  const pos = slot?.pos;
+  if (!slot?.__terryGroupExternalBoolean || !Array.isArray(pos) || pos.length < 2) return null;
+  const x = Number(node.pos?.[0]) + Number(pos[0]);
+  const y = Number(node.pos?.[1]) + Number(pos[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return [x, y];
 }
 
 function syncAll() {
@@ -323,6 +446,55 @@ function patchManagerType(nodeType) {
     if (!this.__terryExternalBoolSyncing) queueMicrotask(() => applyExternalStates(this));
     return result;
   };
+
+  const oldConnectionPos = nodeType.prototype.getConnectionPos;
+  nodeType.prototype.getConnectionPos = function (isInput, slotIndex, out) {
+    const fixed = isInput ? fixedInputPosition(this, slotIndex) : null;
+    if (fixed) {
+      if (out) {
+        out[0] = fixed[0];
+        out[1] = fixed[1];
+        return out;
+      }
+      return fixed;
+    }
+    return oldConnectionPos?.apply(this, arguments);
+  };
+
+  const oldInputPos = nodeType.prototype.getInputPos;
+  if (oldInputPos) {
+    nodeType.prototype.getInputPos = function (slotIndex) {
+      return fixedInputPosition(this, slotIndex) || oldInputPos.apply(this, arguments);
+    };
+  }
+
+  const oldSlotPosition = nodeType.prototype.getSlotPosition;
+  if (oldSlotPosition) {
+    nodeType.prototype.getSlotPosition = function (slotIndex, isInput) {
+      return (isInput ? fixedInputPosition(this, slotIndex) : null) || oldSlotPosition.apply(this, arguments);
+    };
+  }
+
+  const oldForeground = nodeType.prototype.onDrawForeground;
+  nodeType.prototype.onDrawForeground = function (ctx) {
+    const result = oldForeground?.apply(this, arguments);
+    if (!isVueNodesMode() && ctx && !this.flags?.collapsed) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(131,163,187,.52)";
+      ctx.lineWidth = 1;
+      for (const slot of this.inputs || []) {
+        if (!slot?.__terryGroupExternalBoolean || !Array.isArray(slot.pos)) continue;
+        const y = Number(slot.pos[1]);
+        if (!Number.isFinite(y)) continue;
+        ctx.beginPath();
+        ctx.moveTo(3, y);
+        ctx.lineTo(12, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    return result;
+  };
 }
 
 function patchBooleanSourceType(nodeType) {
@@ -354,7 +526,12 @@ app.registerExtension({
     queueMicrotask(() => { ensureInputs(node); applyExternalStates(node); startTimer(); });
   },
 
+  setup() {
+    installStyle();
+  },
+
   afterConfigureGraph() {
+    installStyle();
     if (syncAll()) startTimer();
   },
 });
