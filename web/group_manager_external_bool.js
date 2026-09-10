@@ -263,6 +263,7 @@ function setSlotPos(slot, x, y) {
 }
 
 function syncClassicSlotPositions(node, panel) {
+  if (node?.flags?.collapsed) return;
   syncWidgetAnchor(node);
   const base = widgetTopOffset(node);
   const rows = panel ? [...panel.querySelectorAll(".terry-group-manager__row")] : [];
@@ -300,6 +301,10 @@ function elementScale(root, rect) {
 }
 
 function syncNodes2SlotPositions(node, panel) {
+  if (node?.flags?.collapsed) {
+    ensureGuideLayer(nodeRoot(node))?.replaceChildren();
+    return;
+  }
   const root = nodeRoot(node);
   if (!root || !panel) return;
   const count = savedGroups(node).length;
@@ -410,6 +415,7 @@ function applyExternalStates(node) {
 }
 
 function fixedInputPosition(node, slotIndex) {
+  if (node?.flags?.collapsed) return null;
   const index = Number(slotIndex);
   if (!Number.isInteger(index) || index < 0) return null;
   const slot = node.inputs?.[index];
