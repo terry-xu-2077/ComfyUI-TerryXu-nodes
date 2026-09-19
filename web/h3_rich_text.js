@@ -626,6 +626,19 @@ export function bindH3TagInteractions(editor, options = {}) {
     else openNumberPicker(editor, chip, type, options, state);
   });
   editor.addEventListener("keydown", (event) => deleteAdjacentTag(editor, event, options));
+  editor.addEventListener("copy", (event) => {
+    const selection = window.getSelection?.();
+    if (!selection?.rangeCount || selection.isCollapsed) return;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return;
+
+    const fragment = range.cloneContents();
+    const text = serializeH3RichText(fragment);
+    if (!text) return;
+
+    event.preventDefault();
+    event.clipboardData?.setData("text/plain", text);
+  });
 }
 
 export function installH3RichTextStyles() {
