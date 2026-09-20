@@ -12,6 +12,7 @@ const PACK_LANES_PROPERTY = "terry_wire_bus_lanes";
 const UNPACK_LANES_PROPERTY = "terry_wire_bus_lane_ids";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
 const UNPACK_OUTPUT_MODE_PROPERTY = "terry_wire_bus_expand_outputs";
+const UNPACK_SAVED_LINKS_PROPERTY = "terry_wire_bus_saved_output_links";
 
 const LANE_FIELD = "terry_lane_id";
 const BUS_OUTPUT_FIELD = "terry_bus_passthrough_output";
@@ -591,6 +592,51 @@ function refreshOutputModeControl(node) {
   ui.button.setAttribute("aria-checked", String(value));
 }
 
+function saveUnpackExpandedLinks(node) {
+  if (!isUnpack(node) || !unpackExpanded(node)) return;
+  const saved = [];
+  for (let outputIndex = 0; outputIndex < (node.outputs?.length || 0); outputIndex++) {
+    const output = node.outputs[outputIndex];
+    const laneId = output?.[LANE_FIELD];
+    if (!laneId) continue;
+    for (const linkId of output.links || []) {
+      const link = getLink(node.graph, linkId);
+      if (!link) continue;
+      saved.push({
+        laneId,
+        targetId: link.target_id ?? link.targetId,
+        targetSlot: Number(link.target_slot ?? link.targetSlot ?? 0) || 0,
+      });
+    }
+  }
+  nodeProperties(node)[UNPACK_SAVED_LINKS_PROPERTY] = saved;
+}
+
+function restoreUnpackExpandedLinks(node) {
+  if (!isUnpack(node) || !unpackExpanded(node)) return;
+  const properties = nodeProperties(node);
+  const saved = Array.isArray(properties[UNPACK_SAVED_LINKS_PROPERTY])
+    ? properties[UNPACK_SAVED_LINKS_PROPERTY]
+    : [];
+  if (!saved.length) return;
+
+  for (const item of saved) {
+    const outputIndex = (node.outputs || []).findIndex(
+      (output) => output?.[LANE_FIELD] === item?.laneId
+    );
+    const target = getNode(node.graph, item?.targetId);
+    const targetSlot = Number(item?.targetSlot) || 0;
+    if (outputIndex < 0 || !target?.inputs?.[targetSlot]) continue;
+
+    const alreadyConnected = (node.outputs?.[outputIndex]?.links || []).some((linkId) => {
+      const link = getLink(node.graph, linkId);
+      return String(link?.target_id ?? link?.targetId ?? "") === String(item.targetId)
+        && Number(link?.target_slot ?? link?.targetSlot ?? 0) === targetSlot;
+    });
+    if (!alreadyConnected) node.connect?.(outputIndex, target, targetSlot);
+  }
+}
+
 function setUnpackExpanded(node, value, notify = true) {
   if (!isUnpack(node)) return;
   const next = Boolean(value);
@@ -599,10 +645,12 @@ function setUnpackExpanded(node, value, notify = true) {
     refreshOutputModeControl(node);
     return;
   }
+  if (!next && unpackExpanded(node)) saveUnpackExpandedLinks(node);
   properties[UNPACK_OUTPUT_MODE_PROPERTY] = next;
   node.__terryBusSignature = null;
   refreshOutputModeControl(node);
   syncUnpack(node, true);
+  if (next) restoreUnpackExpandedLinks(node);
   node.__terryBusRefreshVisual?.();
   node.graph?.setDirtyCanvas?.(true, true);
   if (notify) node.graph?.change?.();
