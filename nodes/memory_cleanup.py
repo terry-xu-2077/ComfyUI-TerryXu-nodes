@@ -47,7 +47,7 @@ def _trim_current_process_ram() -> None:
 
 
 class MemoryCleanup(io.ComfyNode):
-    """Optional RAM/VRAM cleanup with an order-preserving ANY/List passthrough."""
+    """Independent RAM/cache/model cleanup with an order-preserving passthrough."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -56,8 +56,8 @@ class MemoryCleanup(io.ComfyNode):
             display_name="🧹 内存清理",
             category="TerryXu/工具",
             description=(
-                "任意类型 / ComfyUI List 原样透传。RAM 仅整理当前 ComfyUI 进程；"
-                "VRAM 卸载模型并释放显存缓存。可能增加后续模型重载时间。"
+                "任意类型 / ComfyUI List 原样透传。RAM、显存缓存、模型卸载互相独立；"
+                "仅开启显存缓存清理不会主动卸载已加载模型。"
             ),
             search_aliases=["RAM", "VRAM", "memory cleanup", "内存清理", "显存清理"],
             is_output_node=True,
@@ -79,10 +79,20 @@ class MemoryCleanup(io.ComfyNode):
                 ),
                 io.Boolean.Input(
                     "clean_vram",
-                    display_name="清理 VRAM",
+                    display_name="清理显存缓存",
                     default=True,
                     socketless=True,
-                    tooltip="卸载模型并释放显存缓存；后续使用时可能重新加载。",
+                    tooltip="仅释放可回收的显存缓存，不主动卸载 ComfyUI 已加载模型。",
+                ),
+                io.Boolean.Input(
+                    "unload_models",
+                    display_name="卸载模型",
+                    default=False,
+                    socketless=True,
+                    tooltip=(
+                        "调用 ComfyUI unload_all_models() 主动卸载已加载模型；"
+                        "后续再次使用时需要重新加载。若还要释放显存缓存，请同时开启「清理显存缓存」。"
+                    ),
                 ),
             ],
             outputs=[
@@ -106,23 +116,25 @@ class MemoryCleanup(io.ComfyNode):
         anything: Any = None,
         clean_ram: Any = True,
         clean_vram: Any = True,
+        unload_models: Any = False,
     ) -> io.NodeOutput:
         do_ram = _enabled(clean_ram)
         do_vram = _enabled(clean_vram)
+        do_unload = _enabled(unload_models)
 
         model_management = None
-        if do_vram:
+        if do_vram or do_unload:
             try:
                 import comfy.model_management as model_management
+            except Exception:
+                logger.exception("TerryXu 内存清理：无法导入 ComfyUI 模型管理")
+                model_management = None
+
+        if do_unload and model_management is not None:
+            try:
                 model_management.unload_all_models()
             except Exception:
                 logger.exception("TerryXu 内存清理：卸载模型失败")
-
-        if do_ram or do_vram:
-            try:
-                gc.collect()
-            except Exception:
-                logger.exception("TerryXu 内存清理：Python 垃圾回收失败")
 
         if do_vram and model_management is not None:
             try:
@@ -131,6 +143,10 @@ class MemoryCleanup(io.ComfyNode):
                 logger.exception("TerryXu 内存清理：清理显存缓存失败")
 
         if do_ram:
+            try:
+                gc.collect()
+            except Exception:
+                logger.exception("TerryXu 内存清理：Python 垃圾回收失败")
             _trim_current_process_ram()
 
         # Both sides use ComfyUI List semantics so upstream list elements are
