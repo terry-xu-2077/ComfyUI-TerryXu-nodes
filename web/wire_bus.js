@@ -1691,6 +1691,13 @@ app.registerExtension({
         const source = entry?.source;
         return source ? { node: source.node, slot: source.slot } : undefined;
       };
+
+      // Stable cross-extension contract. TerryDirector and other Terry nodes
+      // should use this named API instead of depending on WireBus internals.
+      nodeType.prototype.__terryBusApiVersion = 1;
+      nodeType.prototype.__terryBusResolveOutput = function (slot) {
+        return this.resolveVirtualOutput?.(slot);
+      };
     }
 
     const originalConnections = nodeType.prototype.onConnectionsChange;
