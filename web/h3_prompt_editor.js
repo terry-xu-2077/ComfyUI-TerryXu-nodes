@@ -98,7 +98,8 @@ function normalizeLinks(node) {
     const slot = Number(link?.source_slot) || 0;
     if (!Number.isFinite(id) || id === Number(node.id)) continue;
     const src = graph?.getNodeById?.(id);
-    if (!src) continue;
+    // Graph restore may configure this editor before its source nodes exist.
+    // Keep unresolved links inert until their origin nodes become available.
     const kind = sourceType(src, slot, link?.source_type);
     const key = `${id}:${slot}`;
     if (seen.has(key)) continue;
@@ -106,7 +107,7 @@ function normalizeLinks(node) {
     out.push({
       source_id: id,
       source_slot: slot,
-      source_type: String(src.outputs?.[slot]?.type || link?.source_type || "*"),
+      source_type: String(src?.outputs?.[slot]?.type || link?.source_type || "*"),
       kind,
     });
   }
@@ -497,10 +498,19 @@ function watchSourceNode(node) {
 }
 
 
+function updateAssetState(node, options = mediaOptions(node)) {
+  if (!node?.__terryH3AssetState) return;
+  const counts = { picture: 0, video: 0, audio: 0 };
+  for (const item of options) if (item.kind in counts) counts[item.kind] += 1;
+  node.__terryH3AssetState.textContent =
+    `参考：图片 ${counts.picture} · 视频 ${counts.video} · 音频 ${counts.audio}`;
+}
+
 function refreshVisibleMediaImages(node) {
   const editor = node?.__terryH3Editor;
   if (!editor || viewMode(node) !== VIEW_VISUAL) return;
   const options = mediaOptions(node);
+  updateAssetState(node, options);
   for (const chip of editor.querySelectorAll(".terry-h3-media-chip")) {
     const match = String(chip.dataset.raw || "").match(/^<(Picture|Video|Audio)\s+(\d+)>$/i);
     if (!match) continue;
@@ -608,13 +618,7 @@ function refreshEditor(node, force = false) {
       btn.textContent = viewMode(node) === VIEW_RAW ? "@" : "</>";
       btn.title = viewMode(node) === VIEW_RAW ? "返回可视化预览" : "显示纯文本原文";
     }
-    const count = mediaOptions(node);
-    if (node.__terryH3AssetState) {
-      const pc = count.filter((x) => x.kind === "picture").length;
-      const vc = count.filter((x) => x.kind === "video").length;
-      const ac = count.filter((x) => x.kind === "audio").length;
-      node.__terryH3AssetState.textContent = `参考：图片 ${pc} · 视频 ${vc} · 音频 ${ac}`;
-    }
+    updateAssetState(node);
   } finally {
     node.__terryH3Rendering = false;
   }
