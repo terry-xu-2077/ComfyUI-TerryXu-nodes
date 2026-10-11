@@ -331,19 +331,52 @@ function isMediaListNode(node) {
   });
 }
 
-// Expand list *only for UI reference enumeration*: execution stays connected to
-// the list node itself, preserving the original ComfyUI list and graph semantics.
+// Only inspect upstream values for known transparent nodes (including the
+// RAM/VRAM-Cleanup 'anything -> output' nodes). Never bypass them for execution.
+function transparentMediaInputIndex(node, outputSlot = 0) {
+  if (!node || Number(outputSlot) !== 0 || node.outputs?.length !== 1) return -1;
+  const type = String(
+    node.comfyClass || node.type || node.constructor?.type || node.constructor?.nodeData?.name || ""
+  ).replace(/[^a-z0-9]/gi, "").toLowerCase();
+  const inputs = node.inputs || [];
+  const anythingIndex = inputs.findIndex((input) => String(input?.name || "").toLowerCase() === "anything");
+  if (type === "ramcleanup" || type === "vramcleanup") return anythingIndex;
+  if (type.endsWith("reroute")) return inputs.length ? 0 : -1;
+
+  // Some third-party passthroughs use the exact same one-in/one-out wildcard
+  // interface. This is a conservative fallback, not a blanket '*' traversal.
+  const output = node.outputs[0];
+  const outputName = String(output?.name || "").toLowerCase();
+  const outputType = String(output?.type || "").toUpperCase();
+  const inputType = String(inputs[anythingIndex]?.type || "").toUpperCase();
+  if (anythingIndex >= 0 && outputName === "output"
+    && (outputType === "*" || outputType === "ANY")
+    && (inputType === "*" || inputType === "ANY")
+    && inputs.every((input, index) => index === anythingIndex || input?.link == null)) {
+    return anythingIndex;
+  }
+  return -1;
+}
+
+// Resolve only the UI thumbnails through list builders and transparent nodes.
+// Execution connections stay intact, including side effects of cleanup nodes.
 function expandDisplayMediaSources(node, slot = 0, route = "", ancestors = new Set()) {
   if (!node) return [];
-  if (!isMediaListNode(node) || ancestors.has(node) || ancestors.size >= 16) {
-    return [{ node, slot, route }];
-  }
+  if (ancestors.has(node) || ancestors.size >= 24) return [];
+  const list = isMediaListNode(node);
+  const passThroughIndex = list ? -1 : transparentMediaInputIndex(node, slot);
+  if (!list && passThroughIndex < 0) return [{ node, slot, route }];
+
   watchSourceNode(node);
   const graph = node.graph || app.graph;
   const visited = new Set(ancestors);
   visited.add(node);
   const entries = [];
-  for (const [inputIndex, input] of (node.inputs || []).entries()) {
+  const inputs = list
+    ? (node.inputs || []).map((input, index) => [index, input])
+    : [[passThroughIndex, node.inputs?.[passThroughIndex]]];
+
+  for (const [inputIndex, input] of inputs) {
     const refs = input?.link != null ? [input.link] : (Array.isArray(input?.links) ? input.links : []);
     for (const [linkIndex, ref] of refs.entries()) {
       const link = graphLink(graph, ref);
@@ -354,11 +387,11 @@ function expandDisplayMediaSources(node, slot = 0, route = "", ancestors = new S
       if (!origin) continue;
       const sourceSlot = Number(link.origin_slot ?? link.originSlot ?? link.from_slot ?? link.fromSlot ?? 0) || 0;
       const resolved = resolveVirtualMediaSource(origin, sourceSlot, link.type);
-      const path = route + "i" + inputIndex + "." + linkIndex + "/";
-      entries.push(...expandDisplayMediaSources(resolved.node || origin, resolved.slot, path, visited));
+      const routeSuffix = route + "i" + inputIndex + "." + linkIndex + "/";
+      entries.push(...expandDisplayMediaSources(resolved.node || origin, resolved.slot, routeSuffix, visited));
     }
   }
-  return entries.length ? entries : [{ node, slot, route }];
+  return entries;
 }
 
 function graphMediaOptions(node) {
@@ -438,8 +471,9 @@ function mediaOptions(node) {
 
 function watchSourceNode(node) {
   if (!node) return;
-  if (isMediaListNode(node) && !node.__terryH3ListConnectionWatch) {
-    node.__terryH3ListConnectionWatch = true;
+  if ((isMediaListNode(node) || transparentMediaInputIndex(node) >= 0)
+    && !node.__terryH3MediaTopologyWatch) {
+    node.__terryH3MediaTopologyWatch = true;
     const previousConnectionsChange = node.onConnectionsChange;
     node.onConnectionsChange = function() {
       const result = previousConnectionsChange?.apply(this, arguments);
