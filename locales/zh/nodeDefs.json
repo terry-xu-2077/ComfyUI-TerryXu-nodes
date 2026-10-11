@@ -18,6 +18,16 @@
       "text_custom_extension": { "name": "自定义文本后缀" }
     }
   },
+  "TerryXuMemoryCleanup": {
+    "display_name": "🧹 内存清理",
+    "description": "仅清理当前 ComfyUI 进程 RAM，可卸载模型并清理 VRAM 缓存，支持任意类型及 ComfyUI List 透传。",
+    "inputs": {
+      "anything": { "name": "anything" },
+      "clean_ram": { "name": "清理 RAM" },
+      "clean_vram": { "name": "清理 VRAM" }
+    },
+    "outputs": { "0": { "name": "output" } }
+  },
   "TerryXuDateFormatter": {
     "display_name": "日期格式化",
     "inputs": {

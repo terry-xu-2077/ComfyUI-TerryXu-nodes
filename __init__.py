@@ -6,6 +6,7 @@ from .nodes import (
     BoolSwitch,
     H3PromptEditor,
     LineSwitch,
+    MemoryCleanup,
     RemoteControl,
 )
 
@@ -20,6 +21,7 @@ class TerryXuExtension(ComfyExtension):
         return [
             H3PromptEditor,
             LineSwitch,
+            MemoryCleanup,
             BoolSwitch,
             BooleanSwitch,
             RemoteControl,

@@ -341,7 +341,8 @@ function transparentMediaInputIndex(node, outputSlot = 0) {
   ).replace(/[^a-z0-9]/gi, "").toLowerCase();
   const inputs = node.inputs || [];
   const anythingIndex = inputs.findIndex((input) => String(input?.name || "").toLowerCase() === "anything");
-  if (type === "ramcleanup" || type === "vramcleanup") return anythingIndex;
+  if (type === "ramcleanup" || type === "vramcleanup"
+    || type === "terryxumemorycleanup") return anythingIndex;
   if (type.endsWith("reroute")) return inputs.length ? 0 : -1;
 
   // Some third-party passthroughs use the exact same one-in/one-out wildcard

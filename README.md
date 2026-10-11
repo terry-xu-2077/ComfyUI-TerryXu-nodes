@@ -63,6 +63,21 @@ https://github.com/terry-xu-2077/ComfyUI-TerryXu-nodes
 
 ---
 
+### 🧹 TerryXu 内存清理
+
+分类：`TerryXu/工具`
+
+RAM 与 VRAM 清理合并为一个双开关节点，可以串接在生成链路中，也能单独执行。
+
+- **清理 RAM**（默认开启）：执行 Python 垃圾回收；Windows 整理当前 ComfyUI 进程的工作集，Linux 尝试 `malloc_trim`，不会整理其他进程或系统文件缓存。
+- **清理 VRAM**（默认开启）：调用 ComfyUI 模型卸载及显存缓存清理接口，可能导致后续模型重新加载。
+- `anything → output` 支持任意类型与 ComfyUI List，保留输入数据及列表顺序；两个开关都关闭时只透传。
+- 即使输入数据相同，工作流再次执行时仍会触发清理。
+
+注意：仍由后续节点引用的数据不能被强制释放，适合在阶段边界清理，不建议放在每步采样循环内。
+
+---
+
 ### TerryXu 视频对比
 
 分类：`TerryXu/Video`

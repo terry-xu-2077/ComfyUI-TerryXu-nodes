@@ -18,6 +18,16 @@
       "text_custom_extension": { "name": "Custom text extension" }
     }
   },
+  "TerryXuMemoryCleanup": {
+    "display_name": "🧹 Memory Cleanup",
+    "description": "Clean this ComfyUI process's RAM and optionally unload models and VRAM cache, while preserving any input type or ComfyUI List.",
+    "inputs": {
+      "anything": { "name": "anything" },
+      "clean_ram": { "name": "Clean RAM" },
+      "clean_vram": { "name": "Clean VRAM" }
+    },
+    "outputs": { "0": { "name": "output" } }
+  },
   "TerryXuDateFormatter": {
     "display_name": "Date Formatter",
     "inputs": {
