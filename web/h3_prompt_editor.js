@@ -321,32 +321,132 @@ function previewFromSource(node, kind) {
   return "";
 }
 
-function mediaOptions(node) {
-  const counts = { picture: 0, video: 0, audio: 0 };
-  return normalizeLinks(node).map((link) => {
-    const displaySource = app.graph?.getNodeById?.(Number(link.source_id));
-    const resolved = resolveVirtualMediaSource(displaySource, link.source_slot, link.source_type);
-    const src = resolved.node || displaySource;
-    const slot = Number(resolved.slot) || 0;
-    const kind = sourceType(src, slot, resolved.type || link.source_type);
-    counts[kind] = (counts[kind] || 0) + 1;
-    const index = counts[kind];
-    const tag = kind === "picture" ? `<Picture ${index}>` : kind === "video" ? `<Video ${index}>` : `<Audio ${index}>`;
-    const label = kind === "picture" ? `Picture ${index}` : kind === "video" ? `Video ${index}` : `Audio ${index}`;
-    if (src && src !== displaySource) watchSourceNode(src);
-    return {
-      kind,
-      index,
-      tag,
-      label,
-      source: filenameFromSource(src, kind).split(/[\/]/).pop() || src?.title || label,
-      preview: previewFromSource(src, kind),
-    };
+function isMediaListNode(node) {
+  return [
+    node?.comfyClass, node?.type, node?.constructor?.type,
+    node?.constructor?.nodeData?.name, node?.title,
+  ].some((name) => {
+    const normalized = String(name || "").replace(/[\s_-]+/g, "").toLowerCase();
+    return /(?:create|make|merge|join|concat|combine|build)list|list(?:create|maker|merge|join|concat|combine)|创建列表|合并列表|列表合并/.test(normalized);
   });
+}
+
+// Expand list *only for UI reference enumeration*: execution stays connected to
+// the list node itself, preserving the original ComfyUI list and graph semantics.
+function expandDisplayMediaSources(node, slot = 0, route = "", ancestors = new Set()) {
+  if (!node) return [];
+  if (!isMediaListNode(node) || ancestors.has(node) || ancestors.size >= 16) {
+    return [{ node, slot, route }];
+  }
+  watchSourceNode(node);
+  const graph = node.graph || app.graph;
+  const visited = new Set(ancestors);
+  visited.add(node);
+  const entries = [];
+  for (const [inputIndex, input] of (node.inputs || []).entries()) {
+    const refs = input?.link != null ? [input.link] : (Array.isArray(input?.links) ? input.links : []);
+    for (const [linkIndex, ref] of refs.entries()) {
+      const link = graphLink(graph, ref);
+      if (!link) continue;
+      const originId = link.origin_id ?? link.originId ?? link.from_id ?? link.fromId;
+      const origin = link.origin_node || link.originNode || link.fromNode
+        || graph?.getNodeById?.(Number(originId));
+      if (!origin) continue;
+      const sourceSlot = Number(link.origin_slot ?? link.originSlot ?? link.from_slot ?? link.fromSlot ?? 0) || 0;
+      const resolved = resolveVirtualMediaSource(origin, sourceSlot, link.type);
+      const path = route + "i" + inputIndex + "." + linkIndex + "/";
+      entries.push(...expandDisplayMediaSources(resolved.node || origin, resolved.slot, path, visited));
+    }
+  }
+  return entries.length ? entries : [{ node, slot, route }];
+}
+
+function graphMediaOptions(node) {
+  const counts = { picture: 0, video: 0, audio: 0 };
+  const entries = [];
+  const graph = node?.graph || app.graph;
+  for (const link of normalizeLinks(node)) {
+    const displaySource = graph?.getNodeById?.(Number(link.source_id));
+    const resolved = resolveVirtualMediaSource(displaySource, link.source_slot, link.source_type);
+    for (const entry of expandDisplayMediaSources(resolved.node || displaySource, resolved.slot)) {
+      const src = entry.node;
+      if (!src) continue;
+      const slot = Number(entry.slot) || 0;
+      const kind = sourceType(src, slot, src.outputs?.[slot]?.type || resolved.type || link.source_type);
+      const index = ++counts[kind];
+      const english = kind === "picture" ? "Picture" : kind === "video" ? "Video" : "Audio";
+      const label = english + " " + index;
+      watchSourceNode(src);
+      entries.push({
+        key: String(link.source_id) + ":" + String(link.source_slot) + (entry.route ? "/" + entry.route : ""),
+        kind, index, tag: "<" + label + ">", label,
+        source: filenameFromSource(src, kind).split(/[\\/]/).pop() || src.title || label,
+        preview: previewFromSource(src, kind),
+      });
+    }
+  }
+  return entries;
+}
+
+function mediaSignature(entries) {
+  return JSON.stringify(entries.map((entry) => [entry.key, entry.kind, entry.source, entry.preview]));
+}
+
+function executedAssetPreview(item) {
+  if (!item?.filename || !["picture", "video"].includes(item.kind)) return "";
+  const query = new URLSearchParams({
+    filename: String(item.filename),
+    type: String(item.folder_type || item.type || "temp"),
+  });
+  if (item.subfolder) query.set("subfolder", String(item.subfolder));
+  return api.apiURL("/view?" + query.toString());
+}
+
+function recordExecutedAssets(node, message) {
+  const items = [
+    message?.terry_h3_assets, message?.ui?.terry_h3_assets, message?.output?.terry_h3_assets,
+  ].find(Array.isArray);
+  if (!items) return;
+  node.__terryH3ExecutedAssets = items;
+  node.__terryH3ExecutedSignature = mediaSignature(graphMediaOptions(node));
+  refreshEditorsSoon();
+}
+
+function mediaOptions(node) {
+  const current = graphMediaOptions(node);
+  const executed = node.__terryH3ExecutedAssets;
+  if (!Array.isArray(executed) || node.__terryH3ExecutedSignature !== mediaSignature(current)) return current;
+  const byId = new Map(current.map((asset) => [asset.kind + ":" + asset.index, asset]));
+  const out = [];
+  for (const asset of executed) {
+    const kind = String(asset?.kind || "");
+    const index = Number(asset?.index);
+    if (!["picture", "video", "audio"].includes(kind) || !Number.isInteger(index) || index < 1) continue;
+    const id = kind + ":" + index;
+    const fallback = byId.get(id);
+    const label = (kind === "picture" ? "Picture " : kind === "video" ? "Video " : "Audio ") + index;
+    out.push({
+      ...fallback,
+      key: fallback?.key || "executed:" + id,
+      kind, index, label, tag: "<" + label + ">",
+      source: fallback?.source || String(asset.filename || label),
+      preview: executedAssetPreview(asset) || fallback?.preview || "",
+    });
+  }
+  return out.length ? out : current;
 }
 
 function watchSourceNode(node) {
   if (!node) return;
+  if (isMediaListNode(node) && !node.__terryH3ListConnectionWatch) {
+    node.__terryH3ListConnectionWatch = true;
+    const previousConnectionsChange = node.onConnectionsChange;
+    node.onConnectionsChange = function() {
+      const result = previousConnectionsChange?.apply(this, arguments);
+      refreshEditorsSoon();
+      return result;
+    };
+  }
   for (const w of node.widgets || []) {
     if (w?.__terryH3Watch) continue;
     w.__terryH3Watch = true;
@@ -362,12 +462,49 @@ function watchSourceNode(node) {
   }
 }
 
+
+function refreshVisibleMediaImages(node) {
+  const editor = node?.__terryH3Editor;
+  if (!editor || viewMode(node) !== VIEW_VISUAL) return;
+  const options = mediaOptions(node);
+  for (const chip of editor.querySelectorAll(".terry-h3-media-chip")) {
+    const match = String(chip.dataset.raw || "").match(/^<(Picture|Video|Audio)\s+(\d+)>$/i);
+    if (!match) continue;
+    const kind = match[1].toLowerCase() === "picture" ? "picture" : match[1].toLowerCase() === "video" ? "video" : "audio";
+    const info = options.find((item) => item.kind === kind && item.index === Number(match[2]));
+    const img = chip.querySelector(":scope > img");
+    const icon = chip.querySelector(":scope > .terry-h3-media-icon");
+    if (info?.preview && kind !== "audio") {
+      if (img) {
+        if (img.getAttribute("src") !== info.preview) img.src = info.preview;
+      } else {
+        const image = document.createElement("img");
+        image.src = info.preview;
+        image.alt = "";
+        image.draggable = false;
+        if (icon) icon.replaceWith(image);
+        else chip.prepend(image);
+      }
+    } else if (img) {
+      const placeholder = document.createElement("span");
+      placeholder.className = "terry-h3-media-icon";
+      placeholder.textContent = kind === "audio" ? "♪" : kind === "video" ? "▶" : "▧";
+      img.replaceWith(placeholder);
+    }
+    chip.title = info?.source || chip.dataset.raw;
+  }
+}
+
 let refreshTimer = null;
 function refreshEditorsSoon() {
   if (refreshTimer) return;
   refreshTimer = setTimeout(() => {
     refreshTimer = null;
-    for (const node of app.graph?._nodes || []) if (isTarget(node)) refreshEditor(node);
+    for (const node of app.graph?._nodes || []) {
+      if (!isTarget(node)) continue;
+      if (document.activeElement === node.__terryH3Editor) refreshVisibleMediaImages(node);
+      else refreshEditor(node);
+    }
   }, 0);
 }
 
@@ -492,6 +629,7 @@ function ensureEditor(node) {
   const prompt = getWidget(node, "prompt");
   if (!prompt) return false;
   hidePromptWidget(prompt);
+  node.__terryH3MediaOptions = () => mediaOptions(node);
 
   const wrap = document.createElement("div");
   wrap.className = "terry-h3-wrap";
@@ -629,6 +767,7 @@ function installNode(nodeType, nodeData) {
   const executed = nodeType.prototype.onExecuted;
   nodeType.prototype.onExecuted = function(message) {
     const r = executed?.apply(this, arguments);
+    recordExecutedAssets(this, message);
     applyExecutedTextPreview(this, message);
     return r;
   };

@@ -205,5 +205,6 @@ class H3PromptEditor(io.ComfyNode):
             ui={
                 "text": [effective_prompt],
                 "terry_h3_source_text": [source_string],
+                "terry_h3_assets": result,
             },
         )

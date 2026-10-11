@@ -79,6 +79,21 @@ function preview(src, kind) {
   return (src.imgs || []).find((item) => item?.src)?.src || "";
 }
 function assets(node, mode) {
+  // H3 editor owns the expanded, execution-aware reference list. Reuse it for
+  // @ menus and Subject bindings so Picture 2 points at list item 2.
+  if (mode === "prompt" && typeof node?.__terryH3MediaOptions === "function") {
+    return node.__terryH3MediaOptions().map((item) => ({
+      key: item.key,
+      kind: item.kind,
+      index: item.index,
+      raw: item.tag,
+      label: item.label,
+      displayLabel: (item.kind === "picture" ? "图片 " : item.kind === "video" ? "视频 " : "音频 ") + item.index,
+      src: null,
+      name: item.source,
+      preview: item.preview,
+    }));
+  }
   const count = { picture: 0, video: 0, audio: 0 }, out = [], seen = new Set();
   for (const link of links(node, mode)) {
     const id = Number(link?.source_id), slot = Number(link?.source_slot) || 0, key = `${id}:${slot}`;
