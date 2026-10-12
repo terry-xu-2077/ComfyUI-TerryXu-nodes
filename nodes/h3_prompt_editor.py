@@ -9,6 +9,9 @@ import folder_paths
 from comfy_api.latest import io, Types
 
 
+TerryDirectorLlamaData = io.Custom("TERRYDIRECTOR_LLAMA_CONFIG")
+
+
 def _kind(value: Any) -> str:
     if isinstance(value, dict) and "waveform" in value:
         return "audio"
@@ -95,6 +98,15 @@ class H3PromptEditor(io.ComfyNode):
             has_intermediate_output=True,
             inputs=[
                 io.String.Input("prompt", display_name="H3 原文", multiline=True, default=""),
+                TerryDirectorLlamaData.Input(
+                    "llama_config",
+                    display_name="Llama",
+                    optional=True,
+                    tooltip=(
+                        "可连接 TerryDirector Llama。连接后编辑框内显示 AI 增强按钮；"
+                        "模型加载与推理由 TerryDirector 共享 Runtime 负责。"
+                    ),
+                ),
                 io.MatchType.Input(
                     "source_text",
                     template=text_input_type,
@@ -128,6 +140,7 @@ class H3PromptEditor(io.ComfyNode):
     def execute(
         cls,
         prompt: Any,
+        llama_config: Any | None = None,
         source_text: Any | None = None,
         visual_preview: Any = True,
         edit_mode: Any = False,
@@ -135,6 +148,7 @@ class H3PromptEditor(io.ComfyNode):
         **asset_inputs,
     ) -> io.NodeOutput:
         prompt_value = _single_input(prompt, "")
+        _single_input(llama_config, None)
         source_value = _single_input(source_text, None)
         _single_input(visual_preview, True)
         edit_value = bool(_single_input(edit_mode, False))
