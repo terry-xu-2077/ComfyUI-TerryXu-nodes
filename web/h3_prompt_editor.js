@@ -620,6 +620,7 @@ function refreshEditor(node, force = false) {
       btn.title = viewMode(node) === VIEW_RAW ? "返回可视化预览" : "显示纯文本原文";
     }
     updateAssetState(node);
+    refreshAiButton(node);
   } finally {
     node.__terryH3Rendering = false;
   }
@@ -627,6 +628,114 @@ function refreshEditor(node, force = false) {
 
 function appendRawEditor(editor, raw) {
   renderH3RawText(editor, raw);
+}
+
+function llamaInputConnected(node) {
+  const input = node?.inputs?.find((slot) => String(slot?.name || "") === "llama_config");
+  return Boolean(input && (input.link != null || (Array.isArray(input.links) && input.links.length)));
+}
+
+function llamaProviderState(node) {
+  const provider = globalThis.TerryDirectorAI;
+  if (!provider?.resolveLlamaState) return { status: "missing", config: null };
+  try {
+    return provider.resolveLlamaState(node) || { status: "disconnected", config: null };
+  } catch {
+    return { status: "disconnected", config: null };
+  }
+}
+
+function refreshAiButton(node) {
+  const button = node?.__terryH3AiButton;
+  if (!button) return;
+
+  const connected = llamaInputConnected(node);
+  button.hidden = !connected;
+  if (!connected) return;
+
+  if (node.__terryH3AiTask) {
+    button.disabled = false;
+    button.classList.add("is-busy");
+    button.title = "取消 AI 增强";
+    return;
+  }
+
+  button.classList.remove("is-busy");
+  const state = llamaProviderState(node);
+  const prompt = currentRaw(node).trim();
+  const reason = state.status === "missing"
+    ? "TerryDirector AI Runtime 尚未加载"
+    : state.status === "bypassed"
+      ? "TerryDirector Llama 当前为 Bypassed"
+      : state.status === "muted"
+        ? "TerryDirector Llama 当前为 Never"
+        : state.status !== "active"
+          ? "TerryDirector Llama 不可用"
+          : !prompt
+            ? "提示词为空"
+            : "";
+
+  button.disabled = Boolean(reason);
+  button.title = reason || "AI 增强当前 H3 提示词";
+}
+
+function setAiStatus(node, text, timeout = 0) {
+  const state = node?.__terryH3AssetState;
+  if (!state) return;
+  state.textContent = String(text || "");
+  if (timeout > 0) {
+    window.setTimeout(() => {
+      if (!node.__terryH3AiTask) updateAssetState(node);
+    }, timeout);
+  }
+}
+
+function adoptAiResult(node, text) {
+  setRaw(node, text, true);
+  const editMode = getWidget(node, "edit_mode");
+  if (editMode) {
+    editMode.value = true;
+    if (editMode._state) editMode._state.value = true;
+    editMode.callback?.(true);
+  }
+  refreshEditor(node, true);
+}
+
+async function runAiEnhancement(node) {
+  if (node.__terryH3AiTask) {
+    await node.__terryH3AiTask.cancel?.();
+    setAiStatus(node, "正在取消 AI 增强…");
+    return;
+  }
+
+  if (viewMode(node) === VIEW_VISUAL) syncFromEditor(node, false);
+  const prompt = currentRaw(node).trim();
+  if (!prompt) return;
+
+  const provider = globalThis.TerryDirectorAI;
+  if (!provider?.startPromptEnhancement) {
+    setAiStatus(node, "TerryDirector AI Runtime 不可用", 2200);
+    refreshAiButton(node);
+    return;
+  }
+
+  try {
+    const task = await provider.startPromptEnhancement(node, prompt);
+    node.__terryH3AiTask = task;
+    setAiStatus(node, "AI 增强中…");
+    refreshAiButton(node);
+
+    const result = await task.result();
+    if (node.__terryH3AiTask !== task) return;
+    adoptAiResult(node, result.prompt);
+    setAiStatus(node, "增强完成", 1800);
+  } catch (error) {
+    const message = String(error?.message || "AI 增强失败");
+    setAiStatus(node, message === "AI 增强已取消" ? "已取消" : message, 2600);
+  } finally {
+    node.__terryH3AiTask = null;
+    refreshAiButton(node);
+  }
 }
 
 function sourceTextConnected(node) {
@@ -682,8 +791,22 @@ function ensureEditor(node) {
   const viewBtn = document.createElement("button"); viewBtn.type = "button"; viewBtn.className = "terry-h3-view";
   viewBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); });
   viewBtn.addEventListener("click", () => setView(node, viewMode(node) === VIEW_RAW ? VIEW_VISUAL : VIEW_RAW));
+
+  const aiBtn = document.createElement("button");
+  aiBtn.type = "button";
+  aiBtn.className = "terry-h3-ai";
+  aiBtn.innerHTML = "<span>✦</span>";
+  aiBtn.hidden = true;
+  aiBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); });
+  aiBtn.addEventListener("click", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    void runAiEnhancement(node);
+  });
+
+  const actions = document.createElement("div"); actions.className = "terry-h3-actions";
+  actions.append(aiBtn, viewBtn);
   const assetState = document.createElement("span"); assetState.className = "terry-h3-state";
-  tools.append(assetState, viewBtn); wrap.append(editor, tools);
+  tools.append(assetState, actions); wrap.append(editor, tools);
 
   editor.addEventListener("input", () => syncFromEditor(node));
   editor.addEventListener("keydown", (e) => e.stopPropagation());
@@ -703,6 +826,7 @@ function ensureEditor(node) {
 
   node.__terryH3Editor = editor;
   node.__terryH3ViewButton = viewBtn;
+  node.__terryH3AiButton = aiBtn;
   node.__terryH3AssetState = assetState;
   node.__terryH3Wrap = wrap;
   node.__terryH3MenuController = attachH3Menus({
@@ -757,7 +881,15 @@ function installStyle() {
 .terry-h3-editor:empty:before{content:attr(data-placeholder);opacity:.4;pointer-events:none}
 .terry-h3-tools{position:absolute;left:8px;right:8px;bottom:5px;display:flex;align-items:center;justify-content:space-between;pointer-events:none}
 .terry-h3-state{font-size:10px;opacity:.5;pointer-events:none}
+.terry-h3-actions{display:flex;align-items:center;gap:5px;pointer-events:auto}
 .terry-h3-view{pointer-events:auto;width:34px;height:23px;padding:0;border:1px solid rgba(255,255,255,.12);border-radius:5px;background:rgba(255,255,255,.05);color:inherit;cursor:pointer;font:600 10px Consolas,monospace}
+.terry-h3-ai{width:28px;height:23px;padding:0;border:1px solid rgba(155,120,255,.34);border-radius:5px;background:rgba(155,120,255,.10);color:#c9bbff;cursor:pointer;font:600 16px/1 Georgia,serif}
+.terry-h3-ai:hover:not(:disabled){border-color:rgba(155,120,255,.62);background:rgba(155,120,255,.18)}
+.terry-h3-ai:disabled{opacity:.30;cursor:default}
+.terry-h3-ai.is-busy{opacity:1}
+.terry-h3-ai.is-busy>span{display:inline-block;animation:terry-h3-ai-spin .8s linear infinite}
+@keyframes terry-h3-ai-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.terry-h3-ai.is-busy>span{animation:none}}
 .terry-h3-chip{display:inline-flex;align-items:center;gap:4px;margin:0 2px;padding:1px 5px;border-radius:5px;background:rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);vertical-align:middle;white-space:nowrap;font:11px/1.5 Consolas,monospace}
 .terry-h3-strong{font-weight:700;background:rgba(255,255,255,.12)}
 .terry-h3-dialogue{background:rgba(0,226,187,.12);color:rgba(190,255,244,.98)}
@@ -795,6 +927,7 @@ function installNode(nodeType, nodeData) {
       setTimeout(() => convertNativeMediaConnection(this, inputIndex, linkInfo), 0);
       setTimeout(() => convertNativeMediaConnection(this, inputIndex), 40);
     }
+    queueMicrotask(() => refreshAiButton(this));
     return r;
   };
   const draw = nodeType.prototype.onDrawForeground;
@@ -829,6 +962,11 @@ app.registerExtension({
   setup() {
     installStyle(); installH3RichTextStyles(); patchCanvas(); patchGraphToPrompt();
     for (const delay of [0, 100, 400, 1000]) setTimeout(() => { patchCanvas(); patchGraphToPrompt(); refreshEditorsSoon(); }, delay);
+    if (!globalThis.__terryH3AiStateTimer) {
+      globalThis.__terryH3AiStateTimer = window.setInterval(() => {
+        for (const node of app.graph?._nodes || []) if (isTarget(node)) refreshAiButton(node);
+      }, 500);
+    }
   },
   beforeRegisterNodeDef(nodeType, nodeData) {
     const name = String(nodeData?.name || "").toLowerCase();
