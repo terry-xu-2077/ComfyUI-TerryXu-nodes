@@ -85,10 +85,10 @@ class H3PromptEditor(io.ComfyNode):
 
         return io.Schema(
             node_id="TerryXuH3PromptEditor",
-            display_name="📃 H3提示词编辑器",
+            display_name="Terry H3 编辑器",
             category="TerryXu/Text",
             is_input_list=True,
-            search_aliases=["MiniMax H3", "H3 prompt", "H3 提示词", "reference prompt", "text preview"],
+            search_aliases=["H3提示词编辑器", "Terry H3 编辑器", "MiniMax H3", "H3 prompt", "H3 提示词", "reference prompt", "text preview"],
             description=(
                 "可视化编写 MiniMax H3 提示词；支持动态数量图片、视频、音频参考及 ComfyUI List 资产输入；"
                 "外部 STRING / TEXT 默认实时跟随，也可点击“编辑副本”转为本地修改；"

@@ -180,7 +180,7 @@ function caretRange(editor, trigger) {
   const caret = selection.getRangeAt(0);
   if (!editor.contains(caret.startContainer) || caret.startContainer.nodeType !== Node.TEXT_NODE) return null;
   const before = String(caret.startContainer.textContent || "").slice(0, caret.startOffset);
-  const match = before.match(trigger === "@" ? /@([^@\n]*)$/ : /\/([^/\n]*)$/);
+  const match = before.match(trigger === "@" ? /[@＠]([^@＠\n]*)$/ : /[\/／]([^\/／\n]*)$/);
   if (!match) return null;
   const range = document.createRange();
   range.setStart(caret.startContainer, caret.startOffset - match[0].length);
@@ -534,18 +534,62 @@ export function attachH3Menus({ node, editor, mode = "prompt", onChange = null }
   if (!node || !editor) return null;
   detachH3Menus(editor); installH3MenuStyles();
   const controller = { node, editor, mode, onChange, menu: null, menuType: null, commandState: null }; controllers.set(editor, controller);
-  const onBeforeInput = (event) => { if (event.inputType !== "insertText" || (event.data !== "@" && event.data !== "/")) return; const trigger = event.data; setTimeout(() => trigger === "@" ? openAssetMenu(controller) : openCommandMenu(controller), 0); };
-  const onInput = () => { if (controller.menu) queueMicrotask(() => refreshOpenMenu(controller)); };
-  const onKeyDown = (event) => { if (handleCommandKey(controller, event)) { event.preventDefault(); event.stopPropagation(); return; } if (event.key === "Escape" && controller.menu) { closeMenu(controller); event.preventDefault(); event.stopPropagation(); } };
+  // IME confirmation often emits insertCompositionText/insertFromComposition
+  // instead of the insertText beforeinput event. Inspect the committed caret
+  // position after input rather than the tentative pre-edit string.
+  let composing = false;
+  const openTypedTrigger = () => {
+    if (controllers.get(editor) !== controller || composing || controller.menu) return;
+    const asset = caretRange(editor, "@");
+    if (asset && !asset.query) { openAssetMenu(controller); return; }
+    const command = caretRange(editor, "/");
+    if (command && !command.query) openCommandMenu(controller);
+  };
+  const onInput = (event) => {
+    if (composing || event.isComposing) return;
+    const type = String(event.inputType || "");
+    queueMicrotask(() => {
+      if (composing || controllers.get(editor) !== controller) return;
+      if (controller.menu) { refreshOpenMenu(controller); return; }
+      // Never open the menu on deletion, paste, undo, or other unrelated edits.
+      if (["insertText", "insertFromComposition", "insertCompositionText", "insertReplacementText"].includes(type)) {
+        openTypedTrigger();
+      }
+    });
+  };
+  const onCompositionStart = () => { composing = true; closeMenu(controller); };
+  const onCompositionEnd = () => {
+    composing = false;
+    // Some IMEs dispatch their final input after compositionend; wait for it.
+    setTimeout(() => openTypedTrigger(), 0);
+  };
+  const onKeyDown = (event) => {
+    // Enter/Escape/arrow keys belong to the IME candidate list while composing.
+    if (composing || event.isComposing || event.keyCode === 229) return;
+    if (handleCommandKey(controller, event)) { event.preventDefault(); event.stopPropagation(); return; }
+    if (event.key === "Escape" && controller.menu) { closeMenu(controller); event.preventDefault(); event.stopPropagation(); }
+  };
   const onPointer = (event) => event.stopPropagation();
   const onDocumentPointer = (event) => {
     const menu = controller.menu;
     if (!menu || menu.contains(event.target)) return;
     closeMenu(controller);
   };
-  editor.addEventListener("beforeinput", onBeforeInput); editor.addEventListener("input", onInput); editor.addEventListener("keydown", onKeyDown); editor.addEventListener("pointerdown", onPointer);
+  editor.addEventListener("input", onInput);
+  editor.addEventListener("compositionstart", onCompositionStart);
+  editor.addEventListener("compositionend", onCompositionEnd);
+  editor.addEventListener("keydown", onKeyDown);
+  editor.addEventListener("pointerdown", onPointer);
   document.addEventListener("pointerdown", onDocumentPointer, true);
-  controller.cleanup = () => { closeMenu(controller); editor.removeEventListener("beforeinput", onBeforeInput); editor.removeEventListener("input", onInput); editor.removeEventListener("keydown", onKeyDown); editor.removeEventListener("pointerdown", onPointer); document.removeEventListener("pointerdown", onDocumentPointer, true); };
+  controller.cleanup = () => {
+    closeMenu(controller);
+    editor.removeEventListener("input", onInput);
+    editor.removeEventListener("compositionstart", onCompositionStart);
+    editor.removeEventListener("compositionend", onCompositionEnd);
+    editor.removeEventListener("keydown", onKeyDown);
+    editor.removeEventListener("pointerdown", onPointer);
+    document.removeEventListener("pointerdown", onDocumentPointer, true);
+  };
   return controller;
 }
 export function detachH3Menus(editor) { const controller = controllers.get(editor); controller?.cleanup?.(); controllers.delete(editor); }

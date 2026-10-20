@@ -11,6 +11,11 @@ import {
 } from "./h3_rich_text.js";
 
 const NODE_ID = "TerryXuH3PromptEditor";
+function migrateLegacyEditorTitle(node) {
+  const title = String(node?.title || "");
+  if (["📃 H3提示词编辑器", "H3提示词编辑器"].includes(title)) node.title = "Terry H3 编辑器";
+  else if (["📃 H3 Prompt Editor", "H3 Prompt Editor"].includes(title)) node.title = "Terry H3 Editor";
+}
 const LINKS_PROP = "terry_h3_virtual_media_links";
 const VIEW_PROP = "terry_h3_view_mode";
 const VIEW_VISUAL = "visual";
@@ -906,7 +911,7 @@ function installNode(nodeType, nodeData) {
   const created = nodeType.prototype.onNodeCreated;
   nodeType.prototype.onNodeCreated = function() {
     const r = created?.apply(this, arguments);
-    ensureLinks(this); ensureSingleMediaInput(this); installEditorSoon(this); patchCanvas(); patchGraphToPrompt();
+    migrateLegacyEditorTitle(this); ensureLinks(this); ensureSingleMediaInput(this); installEditorSoon(this); patchCanvas(); patchGraphToPrompt();
     return r;
   };
   const added = nodeType.prototype.onAdded;
@@ -917,7 +922,7 @@ function installNode(nodeType, nodeData) {
   const configure = nodeType.prototype.onConfigure;
   nodeType.prototype.onConfigure = function(info) {
     const r = configure?.apply(this, arguments);
-    ensureLinks(this); normalizeLinks(this); ensureSingleMediaInput(this); installEditorSoon(this); refreshEditorsSoon(); return r;
+    migrateLegacyEditorTitle(this); ensureLinks(this); normalizeLinks(this); ensureSingleMediaInput(this); installEditorSoon(this); refreshEditorsSoon(); return r;
   };
   const connections = nodeType.prototype.onConnectionsChange;
   nodeType.prototype.onConnectionsChange = function(type, index, connected, linkInfo) {
