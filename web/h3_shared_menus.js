@@ -627,6 +627,58 @@ export function attachH3Menus({ node, editor, mode = "prompt", onChange = null }
     setTimeout(() => openTypedTrigger(trigger, allowQuery), 0);
     setTimeout(() => openTypedTrigger(trigger, allowQuery), 40);
   };
+  const lastTrigger = (text) => {
+    const last = String(text || "").slice(-1);
+    if (last === "@" || last === "＠") return "@";
+    if (last === "/" || last === "／") return "/";
+    return null;
+  };
+  const insertedText = (before, after) => {
+    before = String(before || "");
+    after = String(after || "");
+    let prefix = 0;
+    while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++;
+    let beforeEnd = before.length, afterEnd = after.length;
+    while (beforeEnd > prefix && afterEnd > prefix && before[beforeEnd - 1] === after[afterEnd - 1]) {
+      beforeEnd--; afterEnd--;
+    }
+    return after.slice(prefix, afterEnd);
+  };
+  let suppressPasteMutations = false;
+  const onPaste = () => {
+    suppressPasteMutations = true;
+    // MutationObserver runs before this timer, so only the paste transaction
+    // is suppressed; normal typing immediately afterwards remains observable.
+    setTimeout(() => { suppressPasteMutations = false; }, 0);
+  };
+  const onMutations = (records) => {
+    if (!currentController() || composing || suppressPasteMutations || controller.menu) return;
+    for (const record of records) {
+      let trigger = null;
+      if (record.type === "characterData") {
+        trigger = lastTrigger(insertedText(record.oldValue, record.target?.textContent));
+      } else if (record.type === "childList") {
+        for (const added of record.addedNodes || []) {
+          if (added?.nodeType === Node.TEXT_NODE) {
+            trigger = lastTrigger(added.textContent);
+            if (trigger) break;
+          }
+        }
+      }
+      if (trigger) {
+        // This path works even if the browser/IME omitted beforeinput and
+        // input events, as long as the trigger character reached the DOM.
+        scheduleTypedTrigger(trigger, true);
+        return;
+      }
+    }
+  };
+  const mutationObserver = typeof MutationObserver === "function"
+    ? new MutationObserver(onMutations)
+    : null;
+  mutationObserver?.observe(editor, {
+    subtree: true, childList: true, characterData: true, characterDataOldValue: true,
+  });
   const onBeforeInput = (event) => {
     const trigger = triggerFromInput(event);
     if (trigger) scheduleTypedTrigger(trigger, true);
@@ -666,6 +718,14 @@ export function attachH3Menus({ node, editor, mode = "prompt", onChange = null }
     if (handleCommandKey(controller, event)) { event.preventDefault(); event.stopPropagation(); return; }
     if (event.key === "Escape" && controller.menu) { closeMenu(controller); event.preventDefault(); event.stopPropagation(); }
   };
+  const onKeyUp = (event) => {
+    const trigger = triggerFromKey(event);
+    if (trigger) scheduleTypedTrigger(trigger, true);
+  };
+  const onTextInput = (event) => {
+    const trigger = triggerFromInput(event);
+    if (trigger) scheduleTypedTrigger(trigger, true);
+  };
   const onPointer = (event) => event.stopPropagation();
   const onDocumentPointer = (event) => {
     const menu = controller.menu;
@@ -674,18 +734,25 @@ export function attachH3Menus({ node, editor, mode = "prompt", onChange = null }
   };
   editor.addEventListener("beforeinput", onBeforeInput);
   editor.addEventListener("input", onInput);
+  editor.addEventListener("textInput", onTextInput);
+  editor.addEventListener("paste", onPaste);
   editor.addEventListener("compositionstart", onCompositionStart);
   editor.addEventListener("compositionend", onCompositionEnd);
   editor.addEventListener("keydown", onKeyDown);
+  editor.addEventListener("keyup", onKeyUp);
   editor.addEventListener("pointerdown", onPointer);
   document.addEventListener("pointerdown", onDocumentPointer, true);
   controller.cleanup = () => {
     closeMenu(controller);
+    mutationObserver?.disconnect?.();
     editor.removeEventListener("beforeinput", onBeforeInput);
     editor.removeEventListener("input", onInput);
+    editor.removeEventListener("textInput", onTextInput);
+    editor.removeEventListener("paste", onPaste);
     editor.removeEventListener("compositionstart", onCompositionStart);
     editor.removeEventListener("compositionend", onCompositionEnd);
     editor.removeEventListener("keydown", onKeyDown);
+    editor.removeEventListener("keyup", onKeyUp);
     editor.removeEventListener("pointerdown", onPointer);
     document.removeEventListener("pointerdown", onDocumentPointer, true);
   };
