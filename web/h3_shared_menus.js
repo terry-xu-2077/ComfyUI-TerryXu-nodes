@@ -174,17 +174,70 @@ function definitionMap(node, mode) {
   }
   return map;
 }
+function isEditableTextNode(node, editor) {
+  if (!node || node.nodeType !== Node.TEXT_NODE || !editor.contains(node)) return false;
+  let parent = node.parentElement;
+  while (parent && parent !== editor) {
+    const editable = parent.getAttribute?.("contenteditable");
+    if (editable === "true") return true;
+    if (editable === "false") return false;
+    parent = parent.parentElement;
+  }
+  return parent === editor;
+}
+
+function edgeTextBoundary(node, fromEnd, editor) {
+  if (!node) return null;
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (!isEditableTextNode(node, editor)) return null;
+    return { node, offset: fromEnd ? String(node.textContent || "").length : 0 };
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE || node.tagName === "BR"
+      || node.getAttribute?.("contenteditable") === "false") return null;
+  const children = Array.from(node.childNodes || []);
+  if (fromEnd) children.reverse();
+  for (const child of children) {
+    const boundary = edgeTextBoundary(child, fromEnd, editor);
+    if (boundary) return boundary;
+  }
+  return null;
+}
+
+function caretTextBoundary(editor, container, offset) {
+  if (container?.nodeType === Node.TEXT_NODE) {
+    if (!isEditableTextNode(container, editor)) return null;
+    const length = String(container.textContent || "").length;
+    return { node: container, offset: Math.max(0, Math.min(length, Number(offset) || 0)) };
+  }
+  if (container?.nodeType !== Node.ELEMENT_NODE || !editor.contains(container)) return null;
+  const children = container.childNodes || [];
+  const previous = offset > 0 ? children[offset - 1] : null;
+  const next = offset < children.length ? children[offset] : null;
+  // A BR is a hard line boundary; prefer the text after it, never match a
+  // trigger on the previous line.
+  if (previous?.nodeType === Node.ELEMENT_NODE && previous.tagName === "BR") {
+    return edgeTextBoundary(next, false, editor);
+  }
+  return edgeTextBoundary(previous, true, editor) || edgeTextBoundary(next, false, editor);
+}
+
 function caretRange(editor, trigger) {
   const selection = window.getSelection?.();
-  if (!selection?.rangeCount || !selection.isCollapsed) return null;
+  if (!selection?.rangeCount) return null;
   const caret = selection.getRangeAt(0);
-  if (!editor.contains(caret.startContainer) || caret.startContainer.nodeType !== Node.TEXT_NODE) return null;
-  const before = String(caret.startContainer.textContent || "").slice(0, caret.startOffset);
+  if (!editor.contains(caret.commonAncestorContainer)) return null;
+  // IMEs can leave the selection at an element boundary instead of a text
+  // node. For a temporary non-collapsed IME selection, use its committed end.
+  const container = selection.isCollapsed ? caret.startContainer : caret.endContainer;
+  const offset = selection.isCollapsed ? caret.startOffset : caret.endOffset;
+  const boundary = caretTextBoundary(editor, container, offset);
+  if (!boundary) return null;
+  const before = String(boundary.node.textContent || "").slice(0, boundary.offset);
   const match = before.match(trigger === "@" ? /[@＠]([^@＠\n]*)$/ : /[\/／]([^\/／\n]*)$/);
   if (!match) return null;
   const range = document.createRange();
-  range.setStart(caret.startContainer, caret.startOffset - match[0].length);
-  range.setEnd(caret.startContainer, caret.startOffset);
+  range.setStart(boundary.node, boundary.offset - match[0].length);
+  range.setEnd(boundary.node, boundary.offset);
   return { range, query: String(match[1] || "").trim().toLowerCase() };
 }
 function createToken(controller, raw, asset = null) {
@@ -363,9 +416,9 @@ function placeAssetMenuAtElement(menu, anchor) {
   Object.assign(menu.style, { position: "fixed", left: `${Math.max(8, Math.round(left))}px`, top: `${Math.max(8, Math.round(top))}px`, zIndex: "2147483000", isolation: "isolate", pointerEvents: "auto" });
 }
 
-function openAssetMenu(controller) {
+function openAssetMenu(controller, knownHit = null) {
   const { editor } = controller;
-  const hit = caretRange(editor, "@");
+  const hit = knownHit || caretRange(editor, "@");
   if (!hit) { closeMenu(controller); return false; }
   closeMenu(controller);
   const menu = buildAssetMenu(controller, hit.query, (asset) => insertMediaReference(controller, hit, asset));
@@ -482,8 +535,8 @@ function renderCommandMenu(controller, state) {
   });
   placeMenu(menu, controller.editor, 340, 380);
 }
-function openCommandMenu(controller) {
-  const hit = caretRange(controller.editor, "/");
+function openCommandMenu(controller, knownHit = null) {
+  const hit = knownHit || caretRange(controller.editor, "/");
   if (!hit) { closeMenu(controller); return false; }
   closeMenu(controller);
   let list = commands(controller.node, controller.mode);
@@ -534,36 +587,80 @@ export function attachH3Menus({ node, editor, mode = "prompt", onChange = null }
   if (!node || !editor) return null;
   detachH3Menus(editor); installH3MenuStyles();
   const controller = { node, editor, mode, onChange, menu: null, menuType: null, commandState: null }; controllers.set(editor, controller);
-  // IME confirmation often emits insertCompositionText/insertFromComposition
-  // instead of the insertText beforeinput event. Inspect the committed caret
-  // position after input rather than the tentative pre-edit string.
   let composing = false;
-  const openTypedTrigger = () => {
-    if (controllers.get(editor) !== controller || composing || controller.menu) return;
-    const asset = caretRange(editor, "@");
-    if (asset && !asset.query) { openAssetMenu(controller); return; }
-    const command = caretRange(editor, "/");
-    if (command && !command.query) openCommandMenu(controller);
+  const currentController = () => controllers.get(editor) === controller;
+  const triggerFromInput = (event) => {
+    const type = String(event?.inputType || "");
+    if (type && !["insertText", "insertFromComposition", "insertCompositionText", "insertReplacementText"].includes(type)) return null;
+    const data = String(event?.data || "");
+    if (!data) return null;
+    const assetAt = Math.max(data.lastIndexOf("@"), data.lastIndexOf("＠"));
+    const commandAt = Math.max(data.lastIndexOf("/"), data.lastIndexOf("／"));
+    const last = Math.max(assetAt, commandAt);
+    if (last < 0 || last !== data.length - 1) return null;
+    return assetAt > commandAt ? "@" : "/";
+  };
+  const triggerFromKey = (event) => {
+    const key = String(event?.key || "");
+    if (key === "@" || key === "＠") return "@";
+    if (key === "/" || key === "／") return "/";
+    // Some IMEs report Process/Unidentified for Shift+2 rather than "@"
+    // even though the browser will insert the character after keydown.
+    if (event?.shiftKey && event?.code === "Digit2"
+        && ["2", "Process", "Unidentified", ""].includes(key)) return "@";
+    return null;
+  };
+  const openTypedTrigger = (trigger = null, allowQuery = false) => {
+    if (!currentController() || composing || controller.menu) return false;
+    const tryOpen = (symbol) => {
+      const hit = caretRange(editor, symbol);
+      if (!hit || (!allowQuery && hit.query)) return false;
+      return symbol === "@" ? openAssetMenu(controller, hit) : openCommandMenu(controller, hit);
+    };
+    if (trigger === "@") return tryOpen("@");
+    if (trigger === "/") return tryOpen("/");
+    return tryOpen("@") || tryOpen("/");
+  };
+  const scheduleTypedTrigger = (trigger = null, allowQuery = false) => {
+    // Some IMEs commit the DOM after compositionend/key events. A second,
+    // short retry covers that ordering without intercepting native text input.
+    setTimeout(() => openTypedTrigger(trigger, allowQuery), 0);
+    setTimeout(() => openTypedTrigger(trigger, allowQuery), 40);
+  };
+  const onBeforeInput = (event) => {
+    const trigger = triggerFromInput(event);
+    if (trigger) scheduleTypedTrigger(trigger, true);
   };
   const onInput = (event) => {
     if (composing || event.isComposing) return;
     const type = String(event.inputType || "");
+    const trigger = triggerFromInput(event);
+    if (trigger) {
+      scheduleTypedTrigger(trigger, true);
+      return;
+    }
     queueMicrotask(() => {
-      if (composing || controllers.get(editor) !== controller) return;
+      if (!currentController() || composing) return;
       if (controller.menu) { refreshOpenMenu(controller); return; }
-      // Never open the menu on deletion, paste, undo, or other unrelated edits.
-      if (["insertText", "insertFromComposition", "insertCompositionText", "insertReplacementText"].includes(type)) {
+      // Some IMEs omit inputType. Only open when the caret itself is directly
+      // after a bare trigger, so deletion/paste/undo won't summon the menu.
+      if (!type || ["insertText", "insertFromComposition", "insertCompositionText", "insertReplacementText"].includes(type)) {
         openTypedTrigger();
       }
     });
   };
-  const onCompositionStart = () => { composing = true; closeMenu(controller); };
-  const onCompositionEnd = () => {
+  const onCompositionStart = () => { composing = true; };
+  const onCompositionEnd = (event) => {
     composing = false;
-    // Some IMEs dispatch their final input after compositionend; wait for it.
-    setTimeout(() => openTypedTrigger(), 0);
+    const trigger = triggerFromInput(event);
+    scheduleTypedTrigger(trigger, Boolean(trigger));
+    setTimeout(() => {
+      if (currentController() && controller.menu) refreshOpenMenu(controller);
+    }, 0);
   };
   const onKeyDown = (event) => {
+    const trigger = triggerFromKey(event);
+    if (trigger) scheduleTypedTrigger(trigger, true);
     // Enter/Escape/arrow keys belong to the IME candidate list while composing.
     if (composing || event.isComposing || event.keyCode === 229) return;
     if (handleCommandKey(controller, event)) { event.preventDefault(); event.stopPropagation(); return; }
@@ -575,6 +672,7 @@ export function attachH3Menus({ node, editor, mode = "prompt", onChange = null }
     if (!menu || menu.contains(event.target)) return;
     closeMenu(controller);
   };
+  editor.addEventListener("beforeinput", onBeforeInput);
   editor.addEventListener("input", onInput);
   editor.addEventListener("compositionstart", onCompositionStart);
   editor.addEventListener("compositionend", onCompositionEnd);
@@ -583,6 +681,7 @@ export function attachH3Menus({ node, editor, mode = "prompt", onChange = null }
   document.addEventListener("pointerdown", onDocumentPointer, true);
   controller.cleanup = () => {
     closeMenu(controller);
+    editor.removeEventListener("beforeinput", onBeforeInput);
     editor.removeEventListener("input", onInput);
     editor.removeEventListener("compositionstart", onCompositionStart);
     editor.removeEventListener("compositionend", onCompositionEnd);
