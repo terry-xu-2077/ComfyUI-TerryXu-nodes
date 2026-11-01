@@ -1,0 +1,30 @@
+/* Native compact palette: 24px circles, 8px gaps, no heading or preview shell. */
+.terryxu-palette-icon {
+  display: inline-block; width: 16px; height: 16px; background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1.5-3.3 1.5 1.5 0 0 1 1.1-2.5H18a3 3 0 0 0 3-3.2A9 9 0 0 0 12 3Z' fill='none' stroke='black' stroke-width='1.8'/%3E%3Ccircle cx='7.5' cy='10' r='1.2'/%3E%3Ccircle cx='10' cy='6.8' r='1.2'/%3E%3Ccircle cx='14' cy='6.8' r='1.2'/%3E%3Ccircle cx='17' cy='9.5' r='1.2'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.tx-colors {
+  position: fixed; inset: auto; margin: 0; padding: 8px; border: 1px solid var(--border-color, #444); border-radius: 6px;
+  background: var(--comfy-menu-bg, #111); color: var(--input-text, #ddd);
+  box-shadow: 0 2px 8px #0005; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px);
+  overflow: auto; font: 12px/1.4 system-ui, sans-serif;
+}
+.tx-colors * { box-sizing: border-box; }
+.tx-colors button { display: inline-grid; place-items: center; padding: 0; width: 24px; height: 24px; min-width: 24px; border: 0; background: transparent; color: inherit; cursor: pointer; font: 18px/1 system-ui, sans-serif; }
+.tx-color-grid { display: grid; grid-template-columns: repeat(12, 24px); gap: 8px; }
+.tx-colors .tx-color-swatch { border-radius: 50%; color: #fff; text-shadow: 0 1px 2px #000; font-size: 14px; }
+.tx-colors button:hover { outline: 1px solid currentColor; outline-offset: 2px; }
+.tx-colors button:focus-visible, .tx-colors input:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.tx-color-swatch[aria-pressed=true] { outline: 1px solid #ddd; outline-offset: 2px; }
+.tx-color-tools { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.tx-color-brand { padding-left: 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--descrip-text, #aaa); white-space: nowrap; }
+.tx-color-saved { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; max-height: 88px; overflow: auto; padding: 3px; }
+.tx-color-status { font-size: 11px; max-width: 128px; }
+.tx-color-status:empty { display: none; }
+.tx-color-custom:not([hidden]) { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 8px; margin-top: 8px; border-top: 1px solid var(--border-color, #444); }
+.tx-color-custom label { display: flex; align-items: center; gap: 4px; margin: 0; }
+.tx-color-custom input { height: 24px; padding: 2px 4px; border: 1px solid var(--border-color, #444); border-radius: 4px; color: inherit; background: var(--comfy-input-bg, #222); font: 11px ui-monospace, monospace; }
+.tx-color-custom input[type=color] { width: 24px; padding: 1px; cursor: pointer; }
+.tx-color-custom input[type=text] { width: 66px; }
+.tx-color-custom input[aria-invalid=true] { border-color: #ef7474; }
+@media(max-width:420px) { .tx-color-grid { grid-template-columns: repeat(12, 20px); gap: 6px; } .tx-colors .tx-color-swatch { width: 20px; height: 20px; min-width: 20px; } }

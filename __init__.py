@@ -1,6 +1,8 @@
 from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
 
+from . import performance_monitor
+
 from .nodes import (
     BooleanSwitch,
     BoolSwitch,
