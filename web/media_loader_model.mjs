@@ -28,12 +28,24 @@ export function moveMedia(groups, kind, id, targetId, after = false) {
   return { ...groups, [kind]: next };
 }
 
+export function emptyMediaSlot(kind, id) {
+  return { id, kind, empty: true, path: "", name: "", source: "input" };
+}
+
+export function removeMedia(groups, kind, id, referenced) {
+  const asset = groups[kind].find(item => item.id === id);
+  if (!asset) return groups;
+  return { ...groups, [kind]: referenced
+    ? groups[kind].map(item => item.id === id ? emptyMediaSlot(kind, id) : item)
+    : groups[kind].filter(item => item.id !== id) };
+}
+
 export function mediaLanes(node, groups) {
   return MEDIA_KINDS.flatMap(kind => groups[kind].map((asset, index) => {
     const name = `${MEDIA_LABELS[kind]} ${index + 1}`;
     const lane = { id: asset.id, type: MEDIA_TYPES[kind], name };
-    return { laneId: asset.id, lane, name, type: lane.type,
-      source: { node, nodeId: node.id, slot: 0, type: lane.type, name, assetId: asset.id } };
+    return { laneId: asset.id, lane, name, type: lane.type, empty: asset.empty === true,
+      source: asset.empty === true ? null : { node, nodeId: node.id, slot: 0, type: lane.type, name, assetId: asset.id } };
   }));
 }
 

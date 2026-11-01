@@ -1178,7 +1178,9 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
 
   const height = busOnly
     ? fixedBusOnlyHeight
-    : (pairedHeight || (customHeight ? Math.max(minHeight, currentHeight) : preferredHeight));
+    : (isUnpack(node) && isMediaPack(pairedPack)
+        ? preferredHeight
+        : (pairedHeight || (customHeight ? Math.max(minHeight, currentHeight) : preferredHeight)));
 
   node.__terryBusCompactWidth = COMPACT_NODE_WIDTH;
   node.__terryBusMinHeight = minHeight;
@@ -1303,6 +1305,14 @@ function syncUnpack(unpack, force = false) {
 
     ensureUnpackLaneIds(unpack, entries.map((entry) => entry.lane));
     const desiredIds = new Set(entries.map((entry) => entry.laneId));
+    const mediaOrderOnly = isMediaPack(pack)
+      && (unpack.outputs?.length || 0) === entries.length
+      && unpack.outputs.every((output, index) =>
+        desiredIds.has(output[LANE_FIELD]) && output.type === entries[index].type);
+    if (mediaOrderOnly) {
+      // Sorting changes the media at each numbered port, never the wire endpoint.
+      unpack.outputs.forEach((output, index) => { output[LANE_FIELD] = entries[index].laneId; });
+    }
 
     for (let index = (unpack.outputs?.length || 0) - 1; index >= 0; index--) {
       const output = unpack.outputs[index];
@@ -1321,9 +1331,8 @@ function syncUnpack(unpack, force = false) {
       }
     }
 
-    if (isMediaPack(pack)) {
-      // Keep existing connections attached to their asset while the displayed
-      // ports follow the card order, including after undo and workflow reload.
+    if (isMediaPack(pack) && !mediaOrderOnly) {
+      // Preserve surviving asset connections when ports are added or removed.
       const connections = new Map(unpack.outputs.map(output => [output, [...(output.links || [])]]));
       const ordered = entries.map(entry => unpack.outputs.find(output => output[LANE_FIELD] === entry.laneId));
       unpack.outputs.splice(0, unpack.outputs.length, ...ordered);
@@ -1345,7 +1354,7 @@ function syncUnpack(unpack, force = false) {
         output.name = "bus";
         output.label = labels().bus;
       } else {
-        output.name = entry.source ? entry.name : emptyLaneLabel(entry.name, index);
+        output.name = entry.source || isMediaPack(pack) ? entry.name : emptyLaneLabel(entry.name, index);
         output.label = output.name;
       }
       for (const linkId of output.links || []) syncConnectionType(unpack.graph, linkId, output.type);
@@ -1371,6 +1380,20 @@ function syncAllUnpacks() {
 
 export function syncMediaBusOutputs(pack) {
   for (const unpack of connectedUnpacksForPack(pack)) syncUnpack(unpack, true);
+}
+
+export function mediaAssetHasReferences(pack, assetId) {
+  const lanes = effectivePackLaneEntries(pack).map(entry => entry.lane);
+  for (const unpack of connectedUnpacksForPack(pack)) {
+    if (!unpackExpanded(unpack)) {
+      if (unpack.outputs?.some(output => output.links?.length)) return true;
+      continue;
+    }
+    ensureUnpackLaneIds(unpack, lanes);
+    if (unpack.outputs?.some(output => output[LANE_FIELD] === assetId && output.links?.length)) return true;
+  }
+  // A bus consumer without expanded ports can reference any published asset.
+  return collectDownstreamTargets(pack.graph, pack, 0).some(target => !isUnpack(target.node));
 }
 
 function refreshPackSlots(pack) {
@@ -1482,7 +1505,7 @@ function patchGraphToPrompt() {
 
           for (const entry of entries) {
             const source = entry?.source;
-            if (!source) continue;
+            if (!source && !entry.empty) continue;
             const outputIndex = (unpack.outputs || []).findIndex(
               (output) => output?.[LANE_FIELD] === entry.laneId
             );
@@ -1498,6 +1521,16 @@ function patchGraphToPrompt() {
               const targetPrompt = prompt[String(target.nodeId)] || prompt[target.nodeId];
               const input = target.node?.inputs?.[target.slot];
               if (!targetPrompt?.inputs || !input?.name) continue;
+              if (entry.empty) {
+                // Optional references are absent; required consumers silently
+                // skip their branch through the native ExecutionBlocker adapter.
+                const required = target.node.constructor?.nodeData?.input?.required;
+                if (required && Object.hasOwn(required, input.name)) {
+                  const blocked = mediaExecutionSource(prompt, { assetId: entry.laneId }, String(pack.id));
+                  if (blocked) targetPrompt.inputs[input.name] = blocked;
+                } else delete targetPrompt.inputs[input.name];
+                continue;
+              }
               const resolved = executionPromptSource(prompt, source, targetPrompt.inputs[input.name]);
               if (resolved) targetPrompt.inputs[input.name] = resolved;
             }

@@ -79,6 +79,25 @@ class MediaLoaderTests(unittest.TestCase):
             self.assertIsInstance(media.MediaLoader.validate_inputs(json.dumps(self.groups)), str)
         self.assertEqual(media.MediaLoader.execute('{"image":[],"audio":[],"video":[]}').result[0], [])
 
+    def test_cleared_references_are_valid_and_silently_bypass_without_decoding(self):
+        from comfy_execution.graph_utils import ExecutionBlocker
+        original = media.MediaLoader.fingerprint_inputs(json.dumps(self.groups))
+        for kind in ("image", "audio", "video"):
+            self.groups[kind][0] = {"id": self.groups[kind][0]["id"], "kind": kind,
+                                    "empty": True, "path": "", "name": "", "source": "input"}
+        serialized = json.dumps(self.groups)
+        self.assertTrue(media.MediaLoader.validate_inputs(serialized))
+        self.assertNotEqual(media.MediaLoader.fingerprint_inputs(serialized), original)
+        bus = media.MediaLoader.execute(serialized).result[0]
+        with patch.object(media.LoadImage, "load_image", side_effect=AssertionError("empty asset was decoded")):
+            for asset_id in ("a", "s", "v"):
+                value = media.MediaBusItem.execute(bus, asset_id).result[0]
+                self.assertIsInstance(value, ExecutionBlocker)
+                self.assertIsNone(value.message)
+        self.groups["image"][0] = {"id": "a", "path": "a.png"}
+        bus = media.MediaLoader.execute(json.dumps(self.groups)).result[0]
+        self.assertEqual(tuple(media.MediaBusItem.execute(bus, "a").result[0].shape), (1, 8, 16, 3))
+
 
 if __name__ == "__main__":
     sys.argv = [sys.argv[0]]

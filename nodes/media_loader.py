@@ -7,6 +7,7 @@ import folder_paths
 from comfy_api.latest import io, InputImpl
 from comfy_extras.nodes_audio import LoadAudio
 from nodes import LoadImage
+from comfy_execution.graph_utils import ExecutionBlocker
 
 
 MediaBus = io.Custom("TERRY_WIRE_BUS")
@@ -32,6 +33,9 @@ def parse_assets(assets_json):
             if asset["id"] in ids:
                 raise ValueError("媒体资产编号重复")
             ids.add(asset["id"])
+            if asset.get("empty") is True:
+                items.append({"id": asset["id"], "kind": kind, "empty": True})
+                continue
             path = asset.get("path", "")
             if not isinstance(path, str) or Path(path).suffix.lower() not in MEDIA_EXTENSIONS[kind]:
                 raise ValueError(f"媒体文件类型与 {kind} 区域不匹配：{path}")
@@ -75,7 +79,8 @@ class MediaLoader(io.ComfyNode):
 
     @classmethod
     def fingerprint_inputs(cls, assets_json):
-        return [(a["id"], a["kind"], a["source"], a["path"], Path(a["full_path"]).stat().st_mtime_ns,
+        return [(a["id"], a["kind"], "empty") if a.get("empty") else
+                (a["id"], a["kind"], a["source"], a["path"], Path(a["full_path"]).stat().st_mtime_ns,
                  Path(a["full_path"]).stat().st_size) for a in parse_assets(assets_json)]
 
 
@@ -96,6 +101,8 @@ class MediaBusItem(io.ComfyNode):
         asset = next((item for item in bus if item["id"] == asset_id), None)
         if asset is None:
             raise ValueError("媒体已移除，请重新连接总线出口")
+        if asset.get("empty"):
+            return io.NodeOutput(ExecutionBlocker(None))
         annotated = f'{asset["path"]} [{asset["source"]}]'
         if asset["kind"] == "image":
             value = LoadImage().load_image(annotated)[0]

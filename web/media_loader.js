@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { syncMediaBusOutputs } from "./wire_bus.js";
-import { MEDIA_KINDS, MEDIA_LABELS, readMedia, mediaFile, moveMedia, mediaLanes } from "./media_loader_model.mjs";
+import { syncMediaBusOutputs, mediaAssetHasReferences } from "./wire_bus.js";
+import { MEDIA_KINDS, MEDIA_LABELS, readMedia, mediaFile, moveMedia, emptyMediaSlot, removeMedia, mediaLanes } from "./media_loader_model.mjs";
 
 const NODE_ID = "TerryXuMediaLoader";
 let directorModule;
@@ -93,7 +93,7 @@ function install(node) {
     tracker?.captureCanvasState();
     node.setDirtyCanvas(true, true);
   };
-  const add = async (kind, anchor, native = false, replaceId = null) => {
+  const add = async (kind, anchor, native = false, replaceId) => {
     if (picker) return;
     anchor.disabled = true; report("");
     try {
@@ -101,11 +101,11 @@ function install(node) {
       if (disposed) return;
       const onSelect = file => {
         if (disposed) return;
-        const asset = mediaFile(file, kind, replaceId || crypto.randomUUID());
+        const asset = mediaFile(file, kind, replaceId);
         const next = groups();
-        const index = replaceId ? next[kind].findIndex(item => item.id === replaceId) : -1;
-        if (replaceId && index < 0) return;
-        if (index < 0) next[kind].push(asset); else next[kind][index] = asset;
+        const index = next[kind].findIndex(item => item.id === replaceId);
+        if (index < 0) return;
+        next[kind][index] = asset;
         update(next);
       };
       const onClose = () => { picker = null; anchor.disabled = false; };
@@ -122,14 +122,23 @@ function install(node) {
   function card(asset, kind, index) {
     const el = document.createElement("article"); el.className = "terry-media-card";
     el.draggable = true; el.tabIndex = 0; el.dataset.assetId = asset.id;
-    el.ariaLabel = `${MEDIA_LABELS[kind]} ${index + 1}，${asset.name}，拖动排序`;
+    el.ariaLabel = `${MEDIA_LABELS[kind]} ${index + 1}，${asset.empty ? "空槽位" : asset.name}，拖动排序`;
     const header = document.createElement("header");
     const tag = document.createElement("span"); tag.className = "terry-media-tag"; tag.textContent = `${MEDIA_LABELS[kind]} ${index + 1}`;
-    const remove = button("移除 " + asset.name, "terry-media-remove", () => {
-      const next = groups(); next[kind] = next[kind].filter(item => item.id !== asset.id); update(next);
+    const remove = button("移除 " + (asset.empty ? `${MEDIA_LABELS[kind]} ${index + 1} 空槽位` : asset.name), "terry-media-remove", () => {
+      const referenced = mediaAssetHasReferences(node, asset.id);
+      if (asset.empty && referenced) return report("此空槽位仍被引用，断开连线后可移除。");
+      report(""); update(removeMedia(groups(), kind, asset.id, referenced));
     }); remove.textContent = "×"; header.append(tag, remove);
     const preview = document.createElement("div"); preview.className = "terry-media-preview";
-    if (kind === "image") {
+    if (asset.empty) {
+      const fill = button("添加" + MEDIA_LABELS[kind], "terry-media-fill", () => void add(kind, fill, false, asset.id));
+      fill.title = "点击选择资产；右键使用 ComfyUI 资产选择器";
+      fill.addEventListener("contextmenu", event => {
+        event.preventDefault(); event.stopPropagation(); void add(kind, fill, true, asset.id);
+      });
+      fill.textContent = "+"; preview.append(fill);
+    } else if (kind === "image") {
       const img = document.createElement("img"); img.src = viewURL(asset); img.loading = "lazy"; img.alt = asset.name; img.draggable = false;
       img.addEventListener("error", () => { preview.textContent = "图片无法预览"; }, { once: true }); preview.append(img);
       preview.title = "点击更换图片"; preview.style.cursor = "pointer";
@@ -141,8 +150,12 @@ function install(node) {
       else { const icon = document.createElement("span"); icon.className = "terry-media-audio-icon"; icon.textContent = "♫"; preview.append(icon); }
       preview.append(media);
     }
-    const filename = button("更换 " + asset.name, "terry-media-name", () => void add(kind, filename, false, asset.id));
-    filename.textContent = asset.name; filename.title = asset.path + " · 点击更换";
+    const filename = button(asset.empty ? "添加" + MEDIA_LABELS[kind] : "更换 " + asset.name, "terry-media-name", () => void add(kind, filename, false, asset.id));
+    filename.textContent = asset.empty ? "空槽位 · 点击添加" : asset.name;
+    filename.title = asset.empty ? "保留连线，生成时跳过此引用" : asset.path + " · 点击更换";
+    filename.addEventListener("contextmenu", event => {
+      event.preventDefault(); event.stopPropagation(); void add(kind, filename, true, asset.id);
+    });
     el.append(header, preview, filename);
     el.addEventListener("dragstart", event => {
       if (event.target.closest("button,audio,video")) { event.preventDefault(); return; }
@@ -184,9 +197,10 @@ function install(node) {
       const heading = document.createElement("h3"); heading.textContent = MEDIA_LABELS[kind];
       const count = document.createElement("span"); count.textContent = String(next[kind].length); heading.append(count);
       const grid = document.createElement("div"); grid.className = "terry-media-grid";
-      const plus = button("添加" + MEDIA_LABELS[kind], "terry-media-add", () => void add(kind, plus)); plus.textContent = "+";
-      plus.title += "；右键使用 ComfyUI 资产选择器";
-      plus.addEventListener("contextmenu", event => { event.preventDefault(); event.stopPropagation(); void add(kind, plus, true); });
+      const plus = button("添加" + MEDIA_LABELS[kind] + "空槽位", "terry-media-add", () => {
+        const next = groups(); next[kind].push(emptyMediaSlot(kind, crypto.randomUUID()));
+        report(""); update(next);
+      }); plus.textContent = "+";
       sectionHead.append(heading, plus);
       grid.append(...next[kind].map((asset, index) => card(asset, kind, index)));
       grid.addEventListener("dragover", event => { if (dragging?.kind === kind) event.preventDefault(); });

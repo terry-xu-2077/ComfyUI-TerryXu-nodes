@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
-import { readMedia, moveMedia, mediaFile, mediaLanes, mediaExecutionSource } from "../web/media_loader_model.mjs";
+import { readMedia, moveMedia, removeMedia, mediaFile, mediaLanes, mediaExecutionSource } from "../web/media_loader_model.mjs";
 
 const asset = (id, kind = "image") => ({ id, kind, path: `${id}.png`, source: "input", name: `${id}.png` });
 
@@ -35,20 +35,21 @@ test("bus lanes preserve asset identities while ports follow per-type order", ()
   assert.equal(mediaExecutionSource(prompt, { nodeId: 9 }, "9"), null);
 });
 
-test("real Bus-Out sync and prompt expansion keep connections on the same asset after sort", async () => {
+for (const unpackType of ["TerryXuWireBusUnpack", "TerryXuWirelessBusUnpack"]) {
+test(`${unpackType} sorting keeps port connections fixed and executes media in the new order`, async () => {
   const graph = { _nodes: [], links: {}, getNodeById(id) { return this._nodes.find(n => String(n.id) === String(id)); } };
   const app = { graph, registerExtension() {}, graphToPrompt: async () => ({ output: {
     "1": { class_type: "TerryXuMediaLoader", inputs: { assets_json: "{}" } },
-    "3": { class_type: "PreviewImage", inputs: { images: ["1", 0] } },
+    "3": { class_type: "MiniMaxH3ReferenceToVideo", inputs: { "ref_images.ref_image_0": ["1", 0], prompt: "test" } },
   } }) };
   const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
     .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
   const context = vm.createContext({ app, mediaExecutionSource, console, navigator: { language: "zh-CN" } });
-  vm.runInContext(source + "\nglobalThis.busTest = {syncUnpack,patchGraphToPrompt};", context);
+  vm.runInContext(source + "\nglobalThis.busTest = {syncUnpack,patchGraphToPrompt,mediaAssetHasReferences};", context);
   const pack = { id: 1, type: "TerryXuMediaLoader", graph, size: [640, 740], outputs: [{ type: "TERRY_WIRE_BUS" }] };
   let groups = { image: [asset("a"), asset("b")], audio: [], video: [] };
   pack.__terryBusLaneEntries = () => mediaLanes(pack, groups);
-  const unpack = { id: 2, type: "TerryXuWirelessBusUnpack", graph, inputs: [{ name: "bus", link: 1 }],
+  const unpack = { id: 2, type: unpackType, graph, inputs: [{ name: "bus", link: 1 }],
     outputs: [], properties: {}, widgets: [], setSize(size) { this.size = size; },
     addOutput(name, type) {
       const slot = { name, type };
@@ -58,19 +59,88 @@ test("real Bus-Out sync and prompt expansion keep connections on the same asset 
       this.outputs.push(slot); return slot;
     },
     removeOutput(index) { this.outputs.splice(index, 1); } };
-  const sink = { id: 3, inputs: [{ name: "images", link: 2 }] };
+  const sink = { id: 3, inputs: [{ name: "ref_images.ref_image_0", link: 2 }] };
   graph._nodes.push(pack, unpack, sink);
   graph.links[1] = { id: 1, origin_id: 1, origin_slot: 0, target_id: 2, target_slot: 0 };
   context.busTest.syncUnpack(unpack);
-  graph.links[2] = { id: 2, origin_id: 2, origin_slot: 0, target_id: 3, target_slot: 0 };
+  graph.links[2] = { id: 2, origin_id: 2, origin_slot: 0, target_id: 3, target_slot: 0, type: "IMAGE" };
+  const ports = [...unpack.outputs];
+  const connections = JSON.stringify(graph.links);
   groups = moveMedia(groups, "image", "b", "a");
   context.busTest.syncUnpack(unpack);
   assert.deepEqual(unpack.outputs.map(o => [o.terry_lane_id, o.name]), [["b", "图片 1"], ["a", "图片 2"]]);
-  assert.equal(graph.links[2].origin_slot, 1);
+  assert.equal(graph.links[2].origin_slot, 0);
+  assert.equal(JSON.stringify(graph.links), connections);
+  assert.equal(unpack.outputs[0], ports[0]);
+  assert.equal(unpack.outputs[1], ports[1]);
+  // Undo/redo and serialized lane metadata must keep the same physical ports.
+  groups = moveMedia(groups, "image", "a", "b");
+  context.busTest.syncUnpack(unpack);
+  assert.equal(unpack.outputs[0].terry_lane_id, "a");
+  assert.equal(JSON.stringify(graph.links), connections);
+  groups = moveMedia(groups, "image", "b", "a");
+  context.busTest.syncUnpack(unpack);
+  unpack.properties = JSON.parse(JSON.stringify(unpack.properties));
+  unpack.outputs.forEach(output => { delete output.terry_lane_id; });
+  context.busTest.syncUnpack(unpack, true);
+  assert.equal(unpack.outputs[0].terry_lane_id, "b");
+  assert.equal(JSON.stringify(graph.links), connections);
   assert.ok(unpack.size[1] < 300, "Bus-Out must not inherit the loader's large card-panel height");
+  const compactHeight = unpack.size[1];
+  // Nodes saved while stretched must also shrink; legacy height must not be
+  // mistaken for a user override on every subsequent media-bus refresh.
+  unpack.size[1] = 800;
+  context.busTest.syncUnpack(unpack, true);
+  assert.equal(unpack.size[1], compactHeight);
+  assert.equal(JSON.stringify(graph.links), connections);
   context.busTest.patchGraphToPrompt();
   const { output } = await app.graphToPrompt();
-  assert.deepEqual(output["3"].inputs.images, ["1:media:a", 0]);
-  assert.equal(output["1:media:a"].inputs.asset_id, "a");
-  assert.equal(output["1:media:b"], undefined, "unused media must not be decoded");
+  assert.deepEqual(output["3"].inputs["ref_images.ref_image_0"], ["1:media:b", 0]);
+  assert.equal(output["1:media:b"].inputs.asset_id, "b");
+  assert.equal(output["1:media:a"], undefined, "unused media must not be decoded");
+  assert.equal(context.busTest.mediaAssetHasReferences(pack, "b"), true);
+  assert.equal(context.busTest.mediaAssetHasReferences(pack, "a"), false);
+  groups = removeMedia(groups, "image", "b", true);
+  context.busTest.syncUnpack(unpack, true);
+  assert.equal(groups.image[0].empty, true);
+  assert.equal(unpack.outputs[0], ports[0]);
+  assert.equal(unpack.outputs[0].name, "图片 1");
+  assert.equal(JSON.stringify(graph.links), connections);
+  const bypassed = (await app.graphToPrompt()).output;
+  assert.equal("ref_images.ref_image_0" in bypassed["3"].inputs, false);
+  assert.equal(bypassed["3"].inputs.prompt, "test");
+  assert.equal(bypassed["1:media:b"], undefined, "an empty reference must not create a media decoder");
+  // Required media consumers need a blocker connection rather than a missing
+  // required input; optional H3 references above remain absent and can generate.
+  sink.constructor = { nodeData: { input: { required: { "ref_images.ref_image_0": ["IMAGE"] } } } };
+  const required = (await app.graphToPrompt()).output;
+  assert.deepEqual(required["3"].inputs["ref_images.ref_image_0"], ["1:media:b", 0]);
+  assert.equal(required["1:media:b"].inputs.asset_id, "b");
+  delete sink.constructor;
+  groups = readMedia(JSON.stringify(groups));
+  context.busTest.syncUnpack(unpack, true);
+  assert.equal(JSON.stringify(graph.links), connections);
+  groups.image[0] = mediaFile({path:"replacement.png"}, "image", "b");
+  context.busTest.syncUnpack(unpack, true);
+  assert.equal(JSON.stringify(graph.links), connections);
+  const restored = (await app.graphToPrompt()).output;
+  assert.deepEqual(restored["3"].inputs["ref_images.ref_image_0"], ["1:media:b", 0]);
+  assert.equal(restored["1:media:b"].inputs.asset_id, "b");
+});
+}
+
+test("only referenced removals retain a serializable empty slot", () => {
+  for (const kind of ["image", "audio", "video"]) {
+    const groups = {image:[],audio:[],video:[],[kind]:[asset("first",kind),asset("second",kind)]};
+    const removed = removeMedia(groups,kind,"first",false);
+    assert.deepEqual(removed[kind].map(item=>item.id),["second"]);
+    const cleared = readMedia(JSON.stringify(removeMedia(groups,kind,"first",true)));
+    assert.equal(cleared[kind].length,2);
+    assert.equal(cleared[kind][0].empty,true);
+    assert.equal(cleared[kind][1].id,"second");
+    const lane = mediaLanes({id:1},cleared)[0];
+    assert.equal(lane.source,null);
+    assert.equal(lane.empty,true);
+    assert.equal(lane.laneId,"first");
+  }
 });
