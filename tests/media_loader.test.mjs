@@ -36,7 +36,8 @@ test("bus lanes preserve asset identities while ports follow per-type order", ()
 });
 
 for (const unpackType of ["TerryXuWireBusUnpack", "TerryXuWirelessBusUnpack"]) {
-test(`${unpackType} sorting keeps port connections fixed and executes media in the new order`, async () => {
+for (const bridgeType of [null, "TerryXuWireBusPack", "TerryXuWirelessBusPack"]) {
+test(`${unpackType}${bridgeType ? ` through ${bridgeType}` : ""} sorting keeps port connections fixed and executes media in the new order`, async () => {
   const graph = { _nodes: [], links: {}, getNodeById(id) { return this._nodes.find(n => String(n.id) === String(id)); } };
   const app = { graph, registerExtension() {}, graphToPrompt: async () => ({ output: {
     "1": { class_type: "TerryXuMediaLoader", inputs: { assets_json: "{}" } },
@@ -62,6 +63,22 @@ test(`${unpackType} sorting keeps port connections fixed and executes media in t
   const sink = { id: 3, inputs: [{ name: "ref_images.ref_image_0", link: 2 }] };
   graph._nodes.push(pack, unpack, sink);
   graph.links[1] = { id: 1, origin_id: 1, origin_slot: 0, target_id: 2, target_slot: 0 };
+  if (bridgeType) {
+    const bridge = { id: 6, type: bridgeType, graph, properties: {}, size: [112, 160],
+      inputs: [{ name: "bus", type: "TERRY_WIRE_BUS", link: 3 }], outputs: [{ type: "TERRY_WIRE_BUS", links: [1] }],
+      setSize(size) { this.size = size; } };
+    graph._nodes.push(bridge);
+    pack.outputs[0].links = [3];
+    graph.links[3] = { id: 3, origin_id: 1, origin_slot: 0, target_id: 6, target_slot: 0, type: "TERRY_WIRE_BUS" };
+    graph.links[1].origin_id = 6;
+    if (unpackType === "TerryXuWirelessBusUnpack" && bridgeType === "TerryXuWirelessBusPack") {
+      // Receive by channel without a physical cable, as in the reported case.
+      bridge.properties.terry_wireless_bus_channel = "总线 1";
+      unpack.properties.terry_wireless_bus_channel = "总线 1";
+      unpack.inputs[0].link = null;
+      delete graph.links[1];
+    }
+  }
   context.busTest.syncUnpack(unpack);
   graph.links[2] = { id: 2, origin_id: 2, origin_slot: 0, target_id: 3, target_slot: 0, type: "IMAGE" };
   const ports = [...unpack.outputs];
@@ -99,7 +116,7 @@ test(`${unpackType} sorting keeps port connections fixed and executes media in t
   assert.equal(output["1:media:b"].inputs.asset_id, "b");
   assert.equal(output["1:media:a"], undefined, "unused media must not be decoded");
   assert.equal(context.busTest.mediaAssetHasReferences(pack, "b"), true);
-  assert.equal(context.busTest.mediaAssetHasReferences(pack, "a"), false);
+  if (!bridgeType) assert.equal(context.busTest.mediaAssetHasReferences(pack, "a"), false);
   groups = removeMedia(groups, "image", "b", true);
   context.busTest.syncUnpack(unpack, true);
   assert.equal(groups.image[0].empty, true);
@@ -127,6 +144,7 @@ test(`${unpackType} sorting keeps port connections fixed and executes media in t
   assert.deepEqual(restored["3"].inputs["ref_images.ref_image_0"], ["1:media:b", 0]);
   assert.equal(restored["1:media:b"].inputs.asset_id, "b");
 });
+}
 }
 
 test("only referenced removals retain a serializable empty slot", () => {

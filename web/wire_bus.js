@@ -146,10 +146,24 @@ function isH3MediaTarget(node, input) {
 function canConnectBusOutput(targetNode, input) {
   return (
     isUnpack(targetNode)
+    || isWiredPack(targetNode)
+    || isWirelessPack(targetNode)
     || isReroute(targetNode)
     || isSet(targetNode)
     || isH3MediaTarget(targetNode, input)
   );
+}
+
+function canConnectPackInput(pack, slot, type) {
+  if (slot < 0 || !pack.inputs?.[slot]) return false;
+  // A connected bus occupies the whole pack. Disconnect it before adding or
+  // replacing wires, including during the deferred slot refresh.
+  if (pack.inputs.some(input => input.link != null && (
+    input.type === BUS_TYPE || resolveUpstream(pack.graph, input.link)?.type === BUS_TYPE
+  ))) return false;
+  if (String(type).toUpperCase() !== BUS_TYPE) return true;
+  return pack.inputs.every(input => input.link == null)
+    && !storedPackLanes(pack).some(lane => laneHasOutputLinks(pack, lane.id));
 }
 
 function getLink(graph, linkId) {
@@ -796,7 +810,7 @@ function resolveUpstream(graph, linkId, seen = new Set()) {
     const laneId = node.outputs?.[slot]?.[LANE_FIELD];
     const entry = laneId ? entries.find((item) => item.laneId === laneId) : null;
     const input = entry?.input;
-    if (isMediaPack(pack)) return entry?.source || null;
+    if (entry?.mediaPack) return entry.source || null;
     return input?.link == null ? null : resolveUpstream(entry.inputGraph || pack.graph, input.link, seen);
   }
 
@@ -1014,14 +1028,21 @@ function packLaneEntries(pack) {
 
 function effectivePackLaneEntries(pack, seen = new Set()) {
   if (!pack || seen.has(pack)) return [];
-  if (isMediaPack(pack)) return pack.__terryBusLaneEntries?.() || [];
+  seen.add(pack);
+  if (isMediaPack(pack)) return (pack.__terryBusLaneEntries?.() || [])
+    .map(entry => ({ ...entry, mediaPack: pack }));
   const physical = packLaneEntries(pack);
+  const bridge = physical.find(entry => entry.source?.type === BUS_TYPE && isPack(entry.source.node));
+  if (bridge) {
+    // Bus-In forwards the upstream lanes instead of wrapping the entire bus
+    // in one lane. Preserve their identities, media origin and source graph.
+    return effectivePackLaneEntries(bridge.source.node, seen).map(entry => ({
+      ...entry, bridgeInput: bridge.input, bridgeLaneId: bridge.laneId,
+    }));
+  }
   return physical.map((entry) => ({
     ...entry,
     inputGraph: pack.graph,
-    ...(isWirelessPack(pack) && entry.source?.type === BUS_TYPE && isWiredPack(entry.source.node)
-      ? { bridgeInput: entry.input, bridgeLaneId: entry.laneId }
-      : {}),
   }));
 }
 
@@ -1305,7 +1326,8 @@ function syncUnpack(unpack, force = false) {
 
     ensureUnpackLaneIds(unpack, entries.map((entry) => entry.lane));
     const desiredIds = new Set(entries.map((entry) => entry.laneId));
-    const mediaOrderOnly = isMediaPack(pack)
+    const hasMediaLanes = isMediaPack(pack) || entries.some(entry => entry.mediaPack);
+    const mediaOrderOnly = hasMediaLanes
       && (unpack.outputs?.length || 0) === entries.length
       && unpack.outputs.every((output, index) =>
         desiredIds.has(output[LANE_FIELD]) && output.type === entries[index].type);
@@ -1331,7 +1353,7 @@ function syncUnpack(unpack, force = false) {
       }
     }
 
-    if (isMediaPack(pack) && !mediaOrderOnly) {
+    if (hasMediaLanes && !mediaOrderOnly) {
       // Preserve surviving asset connections when ports are added or removed.
       const connections = new Map(unpack.outputs.map(output => [output, [...(output.links || [])]]));
       const ordered = entries.map(entry => unpack.outputs.find(output => output[LANE_FIELD] === entry.laneId));
@@ -1354,7 +1376,7 @@ function syncUnpack(unpack, force = false) {
         output.name = "bus";
         output.label = labels().bus;
       } else {
-        output.name = entry.source || isMediaPack(pack) ? entry.name : emptyLaneLabel(entry.name, index);
+        output.name = entry.source || entry.mediaPack ? entry.name : emptyLaneLabel(entry.name, index);
         output.label = output.name;
       }
       for (const linkId of output.links || []) syncConnectionType(unpack.graph, linkId, output.type);
@@ -1431,8 +1453,8 @@ function refreshPackSlots(pack) {
     if (input.link != null) syncConnectionType(pack.graph, input.link, input.type);
   }
 
-  const upstreamBusEntry = isWirelessPack(pack) && entries.find((entry) =>
-    entry.source?.type === BUS_TYPE && isWiredPack(entry.source.node)
+  const upstreamBusEntry = entries.find((entry) =>
+    entry.source?.type === BUS_TYPE || (entry.input?.link != null && entry.input.type === BUS_TYPE)
   );
   const busOnlyMode = Boolean(upstreamBusEntry);
   if (busOnlyMode) {
@@ -1452,7 +1474,7 @@ function refreshPackSlots(pack) {
   }
 
   const publishedEntries = isWirelessPack(pack) ? effectivePackLaneEntries(pack) : entries;
-  resizeCompactBusNode(pack, publishedEntries.length, upstreamBusEntry?.source?.node || null);
+  resizeCompactBusNode(pack, entries.length, upstreamBusEntry?.source?.node || null);
   pack.__terryBusPublishedLaneCount = publishedEntries.length;
   pack.__terryBusRefreshVisual?.();
   queueMicrotask(syncAllUnpacks);
@@ -1526,7 +1548,7 @@ function patchGraphToPrompt() {
                 // skip their branch through the native ExecutionBlocker adapter.
                 const required = target.node.constructor?.nodeData?.input?.required;
                 if (required && Object.hasOwn(required, input.name)) {
-                  const blocked = mediaExecutionSource(prompt, { assetId: entry.laneId }, String(pack.id));
+                  const blocked = mediaExecutionSource(prompt, { assetId: entry.laneId }, String(entry.mediaPack?.id ?? pack.id));
                   if (blocked) targetPrompt.inputs[input.name] = blocked;
                 } else delete targetPrompt.inputs[input.name];
                 continue;
@@ -1728,8 +1750,8 @@ app.registerExtension({
           ? effectivePackLaneEntries(pack).find((item) => item.laneId === laneId)
           : null;
         const inputGraph = entry?.inputGraph || pack.graph;
-        if (isMediaPack(pack) && entry?.source) {
-          return { origin_id: pack.id, origin_slot: 0 };
+        if (entry?.mediaPack && entry.source) {
+          return { origin_id: entry.mediaPack.id, origin_slot: 0 };
         }
         return entry?.input?.link == null || inputGraph !== this.graph
           ? null
@@ -1783,7 +1805,7 @@ app.registerExtension({
       };
 
       nodeType.prototype.onConnectInput = function (slot, type) {
-        return slot >= 0 && type !== BUS_TYPE;
+        return canConnectPackInput(this, slot, type);
       };
 
       nodeType.prototype.onConnectOutput = function (slot, type, input, targetNode) {

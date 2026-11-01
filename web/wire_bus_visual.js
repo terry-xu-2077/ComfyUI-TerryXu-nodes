@@ -516,6 +516,15 @@ function refreshVuePortStyle() {
       busOutputs.push(`${expandedRoot} .lg-slot--output [data-testid="slot-connection-dot"]`);
       continue;
     }
+    if (type === PACK_TYPE || type === WIRELESS_PACK_TYPE) {
+      for (let slot = 0; slot < (node.inputs?.length || 0); slot++) {
+        const input = node.inputs[slot];
+        if (input?.type !== BUS_TYPE || input.link == null) continue;
+        wirelessBusInputs.push(
+          `${expandedRoot} .lg-slot--input:nth-child(${slot + 1} of .lg-slot--input) [data-testid="slot-connection-dot"]`
+        );
+      }
+    }
     const compactWidth = Math.max(80, Number(node?.__terryBusCompactWidth) || 112);
     const minBodyHeight = Math.max(0, Number(node?.__terryBusMinHeight) || Number(node?.size?.[1]) || 0);
     const bodyHeight = Math.max(minBodyHeight, Number(node?.size?.[1]) || 0);
@@ -573,13 +582,6 @@ ${root}[data-collapsed] [data-testid="node-inner-wrapper"]{
       if (type === WIRELESS_PACK_TYPE) {
         packRows.push(`${expandedRoot} .lg-slot--output`);
         packs.push(`${expandedRoot} .lg-slot--output [data-testid="slot-connection-dot"]`);
-        for (let slot = 0; slot < (node.inputs?.length || 0); slot++) {
-          const input = node.inputs[slot];
-          if (input?.type !== BUS_TYPE || input.link == null) continue;
-          wirelessBusInputs.push(
-            `${expandedRoot} .lg-slot--input:nth-child(${slot + 1} of .lg-slot--input) [data-testid="slot-connection-dot"]`
-          );
-        }
       } else if (type === WIRELESS_UNPACK_TYPE) {
         unpackRows.push(`${expandedRoot} .lg-slot--input`);
         unpacks.push(`${expandedRoot} .lg-slot--input [data-testid="slot-connection-dot"]`);
@@ -824,6 +826,12 @@ function patchBusNode(node) {
       return [Number(this.pos?.[0] || 0), nodeVisualCenterY(this)];
     }
     if (nodeType(this) === PACK_TYPE || nodeType(this) === WIRELESS_PACK_TYPE) {
+      const input = this.inputs?.[Number(slot) || 0];
+      if (input?.type === BUS_TYPE && input.link != null) {
+        // Match the centered capsule in Vue, without the normal lane offset
+        // reserved for the wireless channel control below individual wires.
+        return [Number(this.pos?.[0] || 0), nodeVisualCenterY(this)];
+      }
       return centeredLanePosition(this, slot, this.inputs?.length || 0, true);
     }
     return originalInputPos?.apply?.(this, arguments);
@@ -872,6 +880,11 @@ function patchBusNode(node) {
     try {
       if (nodeType(this) === PACK_TYPE || nodeType(this) === WIRELESS_PACK_TYPE) {
         drawCapsulePort(ctx, this, true, 0);
+        for (let slot = 0; slot < (this.inputs?.length || 0); slot++) {
+          if (this.inputs[slot]?.type === BUS_TYPE && this.inputs[slot].link != null) {
+            drawCapsulePort(ctx, this, false, slot);
+          }
+        }
       }
       if (nodeType(this) === UNPACK_TYPE || nodeType(this) === WIRELESS_UNPACK_TYPE) {
         drawCapsulePort(ctx, this, false, 0);
