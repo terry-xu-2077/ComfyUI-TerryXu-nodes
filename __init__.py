@@ -2,6 +2,7 @@ from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
 
 from . import performance_monitor
+from . import media_loader_routes
 
 from .nodes import (
     BooleanSwitch,
@@ -9,6 +10,8 @@ from .nodes import (
     H3PromptEditor,
     LineSwitch,
     MemoryCleanup,
+    MediaLoader,
+    MediaBusItem,
     RemoteControl,
 )
 
@@ -24,6 +27,8 @@ class TerryXuExtension(ComfyExtension):
             H3PromptEditor,
             LineSwitch,
             MemoryCleanup,
+            MediaLoader,
+            MediaBusItem,
             BoolSwitch,
             BooleanSwitch,
             RemoteControl,

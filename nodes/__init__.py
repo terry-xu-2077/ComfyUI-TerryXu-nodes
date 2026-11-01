@@ -3,6 +3,7 @@ from .bool_switch import BoolSwitch
 from .h3_prompt_editor import H3PromptEditor
 from .line_switch import LineSwitch
 from .memory_cleanup import MemoryCleanup
+from .media_loader import MediaLoader, MediaBusItem
 from .remote_control import RemoteControl
 
 __all__ = [
@@ -11,5 +12,7 @@ __all__ = [
     "H3PromptEditor",
     "LineSwitch",
     "MemoryCleanup",
+    "MediaLoader",
+    "MediaBusItem",
     "RemoteControl",
 ]

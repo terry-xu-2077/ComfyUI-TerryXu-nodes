@@ -1,0 +1,33 @@
+/* Preview > type/order > filename; one add action per media region. Spacing uses
+   4/8/12/16px, 8/12px radii and ComfyUI surface/text/border/accent tokens. */
+.terry-media-loader{--media-surface:var(--comfy-input-bg,#1c2027);--media-text:var(--input-text,#dce2eb);--media-muted:var(--descrip-text,#aeb8c7);--media-border:var(--border-color,#454e5c);--media-accent:var(--p-primary-color,#7399c7);box-sizing:border-box;width:100%;height:100%;padding:12px;overflow:auto;color:var(--media-text);font:13px/1.4 system-ui;background:var(--comfy-menu-bg,#202020);border-radius:8px}
+.terry-media-sections{display:flex;flex-direction:column;gap:8px}
+.terry-media-section{padding:8px;border-radius:12px;background:color-mix(in srgb,var(--media-accent) 5%,var(--comfy-menu-bg,#202020));border:1px solid color-mix(in srgb,var(--media-accent) 16%,var(--comfy-menu-bg,#202020))}
+.terry-media-section[data-kind="image"]{--media-accent:#8db5e8;--media-kind-border:#607fa5;--media-kind-text:#d9ebff;--media-kind-tag:rgba(103,154,220,.22)}
+.terry-media-section[data-kind="audio"]{--media-accent:#ad9add;--media-kind-border:#8071a5;--media-kind-text:#efe7ff;--media-kind-tag:rgba(141,112,201,.24)}
+.terry-media-section[data-kind="video"]{--media-accent:#91c5a0;--media-kind-border:#648b73;--media-kind-text:#e0f6e7;--media-kind-tag:rgba(104,168,123,.22)}
+.terry-media-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+.terry-media-section:has(.terry-media-grid:empty) .terry-media-section-head{margin-bottom:0}
+.terry-media-section h3{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--media-kind-text)}
+.terry-media-section h3 span{color:var(--media-muted);font-size:12px;font-weight:400;font-variant-numeric:tabular-nums}
+.terry-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.terry-media-grid:empty{display:none}
+.terry-media-card{box-sizing:border-box;min-width:0;min-height:172px;padding:8px;border:1px solid var(--media-kind-border);border-radius:12px;background:var(--media-surface);color:var(--media-text);cursor:grab;overflow:hidden}
+.terry-media-card header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.terry-media-tag{padding:3px 8px;border-radius:6px;background:var(--media-kind-tag);color:var(--media-kind-text);font-size:12px;font-weight:600}
+.terry-media-remove{display:grid;place-items:center;width:28px;height:28px;border:1px solid var(--media-border);border-radius:8px;background:transparent;color:var(--media-muted);font:22px/1 system-ui;cursor:pointer}
+.terry-media-remove:hover{color:var(--media-text);background:color-mix(in srgb,var(--media-text) 10%,transparent)}
+.terry-media-preview{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:96px;overflow:hidden;border-radius:8px;background:color-mix(in srgb,var(--media-surface) 75%,black);color:var(--media-muted);font-size:12px}
+.terry-media-preview img,.terry-media-preview video{width:100%;height:100%;object-fit:contain}
+.terry-media-preview audio{width:100%;height:32px}
+.terry-media-audio-icon{font-size:32px;line-height:1.5}
+.terry-media-name{display:block;width:100%;margin-top:8px;padding:0;border:0;background:transparent;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;font:12px/1.4 system-ui;color:var(--media-muted);cursor:pointer}
+.terry-media-name:hover{color:var(--media-text)}
+.terry-media-add{display:grid;place-items:center;flex:none;width:64px;height:28px;padding:0;border:1px solid var(--media-kind-border);border-radius:8px;font:400 24px/1 system-ui;cursor:pointer;color:var(--media-kind-text);background:var(--media-kind-tag)}
+.terry-media-add:hover,.terry-media-card.is-drop-target{color:var(--media-text);border-color:var(--media-accent);background:color-mix(in srgb,var(--media-accent) 10%,var(--media-surface))}
+.terry-media-add:disabled{opacity:.5;cursor:wait}
+.terry-media-loader :focus-visible{outline:2px solid var(--media-accent);outline-offset:2px}
+.terry-media-card.is-dragging{opacity:.35}
+.terry-media-error{padding:8px 0 0;color:var(--error-text,#ffb4ab);font-size:12px}
+.terry-media-native-host{position:fixed!important;transform:none!important;width:280px!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important;overflow:visible!important}
+.terry-media-native-host>button{display:none}

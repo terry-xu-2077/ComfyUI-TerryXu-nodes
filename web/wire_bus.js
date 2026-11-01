@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { mediaExecutionSource } from "./media_loader_model.mjs";
 
 // Stable workflow ids. Never localize these.
 const PACK_TYPE = "TerryXuWireBusPack";
@@ -115,7 +116,8 @@ function isWiredUnpack(node) { return nodeType(node) === UNPACK_TYPE; }
 function isWirelessPack(node) { return nodeType(node) === WIRELESS_PACK_TYPE; }
 function isWirelessUnpack(node) { return nodeType(node) === WIRELESS_UNPACK_TYPE; }
 function isWireless(node) { return isWirelessPack(node) || isWirelessUnpack(node); }
-function isPack(node) { return isWiredPack(node) || isWirelessPack(node); }
+function isMediaPack(node) { return nodeType(node) === "TerryXuMediaLoader"; }
+function isPack(node) { return isWiredPack(node) || isWirelessPack(node) || isMediaPack(node); }
 function isUnpack(node) { return isWiredUnpack(node) || isWirelessUnpack(node); }
 
 function isReroute(node) {
@@ -794,6 +796,7 @@ function resolveUpstream(graph, linkId, seen = new Set()) {
     const laneId = node.outputs?.[slot]?.[LANE_FIELD];
     const entry = laneId ? entries.find((item) => item.laneId === laneId) : null;
     const input = entry?.input;
+    if (isMediaPack(pack)) return entry?.source || null;
     return input?.link == null ? null : resolveUpstream(entry.inputGraph || pack.graph, input.link, seen);
   }
 
@@ -835,8 +838,7 @@ function findPackFromUnpack(unpack) {
     const linkId = unpack?.inputs?.[0]?.link;
     if (unpack?.graph && linkId != null) {
       const upstream = resolveUpstream(unpack.graph, linkId);
-      if (upstream && isWirelessPack(upstream.node)) return upstream.node;
-      if (upstream && isWiredPack(upstream.node)) return upstream.node;
+      if (upstream && isPack(upstream.node)) return upstream.node;
     }
     const name = wirelessChannelName(unpack);
     if (!name) return null;
@@ -1012,6 +1014,7 @@ function packLaneEntries(pack) {
 
 function effectivePackLaneEntries(pack, seen = new Set()) {
   if (!pack || seen.has(pack)) return [];
+  if (isMediaPack(pack)) return pack.__terryBusLaneEntries?.() || [];
   const physical = packLaneEntries(pack);
   return physical.map((entry) => ({
     ...entry,
@@ -1162,7 +1165,7 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   const width = initialized ? Math.max(COMPACT_NODE_WIDTH, currentWidth) : COMPACT_NODE_WIDTH;
 
   const inheritsPairedHeight = !busOnly && (
-    (isUnpack(node) && isPack(pairedPack))
+    (isUnpack(node) && isPack(pairedPack) && !isMediaPack(pairedPack))
     || (isWirelessPack(node) && isWiredPack(pairedPack))
   );
 
@@ -1318,6 +1321,20 @@ function syncUnpack(unpack, force = false) {
       }
     }
 
+    if (isMediaPack(pack)) {
+      // Keep existing connections attached to their asset while the displayed
+      // ports follow the card order, including after undo and workflow reload.
+      const connections = new Map(unpack.outputs.map(output => [output, [...(output.links || [])]]));
+      const ordered = entries.map(entry => unpack.outputs.find(output => output[LANE_FIELD] === entry.laneId));
+      unpack.outputs.splice(0, unpack.outputs.length, ...ordered);
+      ordered.forEach((output, index) => {
+        for (const id of connections.get(output) || []) {
+          const link = getLink(unpack.graph, id);
+          if (link) link.origin_slot = index;
+        }
+      });
+    }
+
     for (let index = 0; index < entries.length; index++) {
       const entry = entries[index];
       const output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
@@ -1352,7 +1369,12 @@ function syncAllUnpacks() {
   }
 }
 
+export function syncMediaBusOutputs(pack) {
+  for (const unpack of connectedUnpacksForPack(pack)) syncUnpack(unpack, true);
+}
+
 function refreshPackSlots(pack) {
+  if (isMediaPack(pack)) return;
   if (!pack?.graph || app.configuringGraph) return;
   const text = labels();
   localizeFixedPorts(pack);
@@ -1416,6 +1438,8 @@ function refreshPackSlots(pack) {
 
 function executionPromptSource(prompt, source, current) {
   const sourceId = String(source?.nodeId ?? source?.node?.id ?? "");
+  const mediaSource = mediaExecutionSource(prompt, source, sourceId);
+  if (mediaSource) return mediaSource;
   const sourceSlot = Number(source?.slot) || 0;
   const hasPromptNode = (id) => id != null
     && Object.prototype.hasOwnProperty.call(prompt, String(id));
@@ -1671,6 +1695,9 @@ app.registerExtension({
           ? effectivePackLaneEntries(pack).find((item) => item.laneId === laneId)
           : null;
         const inputGraph = entry?.inputGraph || pack.graph;
+        if (isMediaPack(pack) && entry?.source) {
+          return { origin_id: pack.id, origin_slot: 0 };
+        }
         return entry?.input?.link == null || inputGraph !== this.graph
           ? null
           : getLink(inputGraph, entry.input.link);
