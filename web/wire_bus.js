@@ -65,8 +65,8 @@ function labels() {
     return {
       
       
-      wirelessPackTitle: "⛓️‍💥 无线总线-入",
-      wirelessUnpackTitle: "⛓️‍💥 无线总线-出",
+      wirelessPackTitle: "↔️ 总线-入",
+      wirelessUnpackTitle: "↔️ 总线-出",
       packDescription: "将任意数量、任意类型的连接汇总为一根虚拟总线，支持 KJNodes Get/Set。",
       unpackDescription: "从虚拟总线自动恢复原始连接的数量、类型和顺序，支持 KJNodes Get/Set。",
       wirelessPackDescription: "将多路连接整理成总线，通过 TerryXu 频道发布。",
@@ -85,8 +85,8 @@ function labels() {
   return {
     
     
-    wirelessPackTitle: "⛓️‍💥 Wireless Bus In",
-    wirelessUnpackTitle: "⛓️‍💥 Wireless Bus Out",
+    wirelessPackTitle: "↔️ Bus-In",
+    wirelessUnpackTitle: "↔️ Bus-Out",
     packDescription: "Bundle any number of connections into one virtual bus. Supports KJNodes Get/Set.",
     unpackDescription: "Restore the original connection count, types and order from a virtual bus. Supports KJNodes Get/Set.",
     wirelessPackDescription: "Group multiple connections and publish them over a TerryXu wireless channel.",

@@ -53,6 +53,6 @@ test("only wireless channel bus nodes are registered", async () => {
   assert.deepEqual(Object.keys(defs).sort(), [
     "TerryXuWirelessBusPack", "TerryXuWirelessBusUnpack",
   ]);
-  assert.equal(defs.TerryXuWirelessBusPack.display_name, "⛓️‍💥 无线总线-入");
-  assert.equal(defs.TerryXuWirelessBusUnpack.display_name, "⛓️‍💥 无线总线-出");
+  assert.equal(defs.TerryXuWirelessBusPack.display_name, "↔️ 总线-入");
+  assert.equal(defs.TerryXuWirelessBusUnpack.display_name, "↔️ 总线-出");
 });

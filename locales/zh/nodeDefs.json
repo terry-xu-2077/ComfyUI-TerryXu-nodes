@@ -72,7 +72,7 @@
     }
   },
   "TerryXuWirelessBusPack": {
-    "display_name": "⛓️‍💥 无线总线-入",
+    "display_name": "↔️ 总线-入",
     "description": "将多路连接发布到独立的 TerryXu 无线总线频道，不与 KJNodes Get/Set 混用。",
     "inputs": {
       "wire": {
@@ -81,7 +81,7 @@
     }
   },
   "TerryXuWirelessBusUnpack": {
-    "display_name": "⛓️‍💥 无线总线-出",
+    "display_name": "↔️ 总线-出",
     "description": "选择 TerryXu 无线总线频道，自动恢复对应的多路连接。"
   },
   "TerryXuLineSwitch": {

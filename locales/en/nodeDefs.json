@@ -72,7 +72,7 @@
     }
   },
   "TerryXuWirelessBusPack": {
-    "display_name": "⛓️‍💥 Wireless Bus In",
+    "display_name": "↔️ Bus-In",
     "description": "Publish multiple connections to an independent TerryXu wireless bus channel.",
     "inputs": {
       "wire": {
@@ -81,7 +81,7 @@
     }
   },
   "TerryXuWirelessBusUnpack": {
-    "display_name": "⛓️‍💥 Wireless Bus Out",
+    "display_name": "↔️ Bus-Out",
     "description": "Select a TerryXu wireless bus channel and restore all of its connections."
   },
   "TerryXuLineSwitch": {
