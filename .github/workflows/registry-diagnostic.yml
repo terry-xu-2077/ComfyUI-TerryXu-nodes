@@ -33,7 +33,9 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import requests
+          import json
+          from urllib.parse import urlencode
+          from urllib.request import urlopen
           base = "https://api.comfy.org/nodes"
           target = "comfyui-terryxu-nodes"
           cases = [
@@ -42,15 +44,11 @@ jobs:
               ("manager-linux", {"page": 1, "limit": 30, "comfyui_version": "unknown", "form_factor": "git-linux"}),
           ]
           for label, params in cases:
-              try:
-                  response = requests.get(base, params=params, timeout=30)
-                  print(f"\\n===== {label}: HTTP {response.status_code} {response.url} =====")
-                  data = response.json()
-                  print("totalPages:", data.get("totalPages"), "total:", data.get("total"))
-                  found = [node for node in data.get("nodes", []) if node.get("id") == target]
-                  print("target_matches:", found)
-              except Exception as exc:
-                  print(label, "ERROR:", repr(exc))
+              url = base + (("?" + urlencode(params)) if params else "")
+              with urlopen(url, timeout=30) as response:
+                  data = json.load(response)
+              found = [node for node in data.get("nodes", []) if node.get("id") == target]
+              print(label, "totalPages=", data.get("totalPages"), "target_matches=", found)
           PY
       - name: Query public Registry records
         shell: bash
