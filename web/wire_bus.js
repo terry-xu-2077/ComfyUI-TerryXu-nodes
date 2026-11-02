@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { mediaExecutionSource } from "./media_loader_model.mjs";
+import { isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE } from "./switch_bus_route.mjs";
 
 // Stable workflow ids. Never localize these.
 const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
@@ -147,6 +148,7 @@ function canConnectBusOutput(targetNode, input) {
     || isReroute(targetNode)
     || isSet(targetNode)
     || isH3MediaTarget(targetNode, input)
+    || (isTerrySwitch(targetNode) && !["index", "enabled"].includes(String(input?.name || "")))
   );
 }
 
@@ -775,6 +777,10 @@ function resolveUpstream(graph, linkId, seen = new Set()) {
   if (!node) return null;
 
   if (isReroute(node)) return resolveUpstream(graph, node.inputs?.[0]?.link, seen);
+  if (isTerrySwitch(node)) {
+    const active = selectedSwitchInput(node);
+    return active?.link == null ? null : resolveUpstream(node.graph || graph, active.link, seen);
+  }
 
   if (isGet(node)) {
     const setter = findSetter(node);
@@ -820,6 +826,37 @@ function resolveUpstream(graph, linkId, seen = new Set()) {
     type: outputType && outputType !== EMPTY_TYPE ? outputType : link.type || EMPTY_TYPE,
     name: outputPortName(output),
   };
+}
+
+// Preserve the real switch node, but expose a BUS socket when its active
+// input carries one. Bus-Out follows the active upstream wire itself.
+function syncSwitchBusType(node) {
+  if (!isTerrySwitch(node) || !node.outputs?.[0]) return false;
+  const output = node.outputs[0];
+  const active = selectedSwitchInput(node);
+  const source = active?.link == null ? null : resolveUpstream(node.graph, active.link);
+  const bus = source?.type === BUS_TYPE;
+  if (bus && !node.__terrySwitchBusTypeOverridden) {
+    node.__terrySwitchBusOriginalType = output.type;
+    node.__terrySwitchBusTypeOverridden = true;
+  }
+  if (!bus && !node.__terrySwitchBusTypeOverridden) return false;
+  const type = bus ? BUS_TYPE : (node.__terrySwitchBusOriginalType || EMPTY_TYPE);
+  if (!bus) {
+    delete node.__terrySwitchBusOriginalType;
+    delete node.__terrySwitchBusTypeOverridden;
+  }
+  if (output.type === type) return false;
+  output.type = type;
+  for (const linkId of output.links || []) syncConnectionType(node.graph, linkId, type);
+  node.graph?.setDirtyCanvas?.(true, true);
+  return true;
+}
+
+function refreshSwitchBus(node) {
+  if (!isTerrySwitch(node)) return;
+  syncSwitchBusType(node);
+  syncAllUnpacks();
 }
 
 function collectDownstreamTargets(graph, node, outputSlot, seenNodes = new Set()) {
@@ -1673,6 +1710,7 @@ function startBridge() {
 
     for (const graph of allGraphs()) {
       for (const node of graph?._nodes || []) {
+        if (isTerrySwitch(node)) syncSwitchBusType(node);
         if (nodeType(node) === LIST_TYPE) syncBusList(node);
         if (isWireless(node)) {
           initializeWirelessControl(node);
@@ -1738,6 +1776,33 @@ app.registerExtension({
 
   beforeRegisterNodeDef(nodeType, nodeData) {
     const nodeName = nodeData.name;
+    if (nodeName === LINE_SWITCH_TYPE || nodeName === BOOL_SWITCH_TYPE) {
+      const created = nodeType.prototype.onNodeCreated;
+      nodeType.prototype.onNodeCreated = function () {
+        const result = created?.apply(this, arguments);
+        queueMicrotask(() => refreshSwitchBus(this));
+        return result;
+      };
+      const configured = nodeType.prototype.onConfigure;
+      nodeType.prototype.onConfigure = function () {
+        const result = configured?.apply(this, arguments);
+        queueMicrotask(() => refreshSwitchBus(this));
+        return result;
+      };
+      const connections = nodeType.prototype.onConnectionsChange;
+      nodeType.prototype.onConnectionsChange = function () {
+        const result = connections?.apply(this, arguments);
+        if (!app.configuringGraph) queueMicrotask(() => refreshSwitchBus(this));
+        return result;
+      };
+      const widgets = nodeType.prototype.onWidgetChanged;
+      nodeType.prototype.onWidgetChanged = function () {
+        const result = widgets?.apply(this, arguments);
+        queueMicrotask(() => refreshSwitchBus(this));
+        return result;
+      };
+      return;
+    }
     if (nodeName === LIST_TYPE) {
       // Public, read-only provenance API for reference pickers such as Flow's
       // @ menu. It exposes current order without changing the execution list.
@@ -1935,6 +2000,7 @@ app.registerExtension({
           type === BUS_TYPE
           || isPack(originNode)
           || isReroute(originNode)
+          || isTerrySwitch(originNode)
           || isGet(originNode)
         );
       };
@@ -1985,6 +2051,7 @@ app.registerExtension({
     startBridge();
     for (const graph of allGraphs()) {
       for (const node of graph?._nodes || []) {
+        if (isTerrySwitch(node)) syncSwitchBusType(node);
         if (isPack(node)) refreshPackSlots(node);
         if (isUnpack(node)) {
           initializeUnpackOutputModeControl(node);
