@@ -1,0 +1,38 @@
+name: Build Comfy Registry Banner
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - assets/banner.svg
+      - .github/workflows/build-banner.yml
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    if: ${{ github.repository == 'terry-xu-2077/ComfyUI-TerryXu-nodes' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render sharp 1916x821 JPG from vector source
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq librsvg2-bin
+          python -m pip install --quiet Pillow
+          rsvg-convert -w 1916 -h 821 assets/banner.svg > /tmp/terryxu-banner.png
+          python - <<'PY'
+          from PIL import Image
+          image = Image.open("/tmp/terryxu-banner.png").convert("RGB")
+          image.save("assets/banner.jpg", "JPEG", quality=90, subsampling=0, optimize=True, progressive=True)
+          PY
+      - name: Commit generated JPG to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/banner.jpg
+          if ! git diff --cached --quiet; then
+            git commit -m "build: update high-quality Registry banner JPG"
+            git push
+          fi
