@@ -35,8 +35,8 @@ test("bus lanes preserve asset identities while ports follow per-type order", ()
   assert.equal(mediaExecutionSource(prompt, { nodeId: 9 }, "9"), null);
 });
 
-for (const unpackType of ["TerryXuWireBusUnpack", "TerryXuWirelessBusUnpack"]) {
-for (const bridgeType of [null, "TerryXuWireBusPack", "TerryXuWirelessBusPack"]) {
+for (const unpackType of ["TerryXuWirelessBusUnpack"]) {
+for (const bridgeType of [null, "TerryXuWirelessBusPack"]) {
 test(`${unpackType}${bridgeType ? ` through ${bridgeType}` : ""} sorting keeps port connections fixed and executes media in the new order`, async () => {
   const graph = { _nodes: [], links: {}, getNodeById(id) { return this._nodes.find(n => String(n.id) === String(id)); } };
   const app = { graph, registerExtension() {}, graphToPrompt: async () => ({ output: {

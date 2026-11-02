@@ -1,8 +1,6 @@
 import { app } from "../../scripts/app.js";
 
 const BUS_TYPE = "TERRY_WIRE_BUS";
-const PACK_TYPE = "TerryXuWireBusPack";
-const UNPACK_TYPE = "TerryXuWireBusUnpack";
 const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
 const WIRELESS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
 const MEDIA_LOADER_TYPE = "TerryXuMediaLoader";
@@ -118,7 +116,7 @@ function isBusLink(graph, link) {
       target?.inputs?.[targetSlot]?.type ||
       ""
   );
-  return type === BUS_TYPE || nodeType(origin) === PACK_TYPE || nodeType(origin) === WIRELESS_PACK_TYPE;
+  return type === BUS_TYPE || nodeType(origin) === WIRELESS_PACK_TYPE;
 }
 
 function pointForOutput(node, slot) {
@@ -196,13 +194,13 @@ function sameColor(a, b) {
 
 function upstreamPack(graph, node, seen = new Set()) {
   if (!node || !graph) return null;
-  if (nodeType(node) === PACK_TYPE || nodeType(node) === WIRELESS_PACK_TYPE) return { node, graph };
+  if (nodeType(node) === WIRELESS_PACK_TYPE) return { node, graph };
 
   const key = `${graph?.id || "g"}:${String(node.id ?? node)}`;
   if (seen.has(key)) return null;
   seen.add(key);
 
-  if (nodeType(node) === UNPACK_TYPE || nodeType(node) === WIRELESS_UNPACK_TYPE) {
+  if (nodeType(node) === WIRELESS_UNPACK_TYPE) {
     const resolved = node.resolveVirtualOutput?.(0);
     if (resolved?.node) {
       const found = upstreamPack(resolved.node.graph || graph, resolved.node, seen);
@@ -471,7 +469,7 @@ function vueBusNodes() {
   for (const graph of workflowBusGraphs()) {
     for (const node of graph?._nodes || graph?.nodes || []) {
       const type = nodeType(node);
-      if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE, MEDIA_LOADER_TYPE, LIST_TYPE].includes(type)) continue;
+      if (![WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE, MEDIA_LOADER_TYPE, LIST_TYPE].includes(type)) continue;
       const id = node?.id == null ? node : String(node.id);
       if (seenIds.has(id)) continue;
       seenIds.add(id);
@@ -521,7 +519,7 @@ function refreshVuePortStyle() {
       unpacks.push(`${expandedRoot} .lg-slot--input [data-testid="slot-connection-dot"]`);
       continue;
     }
-    if (type === PACK_TYPE || type === WIRELESS_PACK_TYPE) {
+    if (type === WIRELESS_PACK_TYPE) {
       for (let slot = 0; slot < (node.inputs?.length || 0); slot++) {
         const input = node.inputs[slot];
         if (input?.type !== BUS_TYPE || input.link == null) continue;
@@ -566,24 +564,6 @@ ${root}[data-collapsed] [data-testid="node-inner-wrapper"]{
 }
 `);
 
-    if (type === PACK_TYPE) {
-      phantomOutputRows.push(`${expandedRoot} .lg-slot--output:not(:first-child)`);
-      packInputGroups.push(`${expandedRoot} :has(> .lg-slot--input)`);
-      packRows.push(`${expandedRoot} .lg-slot--output`);
-      packs.push(`${expandedRoot} .lg-slot--output [data-testid="slot-connection-dot"]`);
-      wiredBadges.push(`${expandedRoot} [data-testid^="node-body-"] > .mt-auto`);
-    } else if (type === UNPACK_TYPE) {
-      unpackOutputGroups.push(`${expandedRoot} :has(> .lg-slot--output)`);
-      unpackRows.push(`${expandedRoot} .lg-slot--input`);
-      unpacks.push(`${expandedRoot} .lg-slot--input [data-testid="slot-connection-dot"]`);
-      wiredBadges.push(`${expandedRoot} [data-testid^="node-body-"] > .mt-auto`);
-      for (let slot = 0; slot < (node.outputs?.length || 0); slot++) {
-        if (String(node.outputs[slot]?.type || "").toUpperCase() !== BUS_TYPE) continue;
-        busOutputs.push(
-          `${expandedRoot} .lg-slot--output:nth-child(${slot + 1} of .lg-slot--output) [data-testid="slot-connection-dot"]`
-        );
-      }
-    } else {
       if (type === WIRELESS_PACK_TYPE) {
         packRows.push(`${expandedRoot} .lg-slot--output`);
         packs.push(`${expandedRoot} .lg-slot--output [data-testid="slot-connection-dot"]`);
@@ -641,7 +621,6 @@ ${root}[data-collapsed]::before{
 }
 `);
       }
-    }
   }
 
   const selectors = [...packs, ...unpacks, ...wirelessBusInputs, ...busOutputs];
@@ -795,7 +774,7 @@ function queueVueStyleRefresh() {
 function patchBusNode(node) {
   if (!node) return;
   const type = nodeType(node);
-  if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE, MEDIA_LOADER_TYPE, LIST_TYPE].includes(type)) return;
+  if (![WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE, MEDIA_LOADER_TYPE, LIST_TYPE].includes(type)) return;
   queueVueStyleRefresh();
   if (node.__terryBusCapsulePatched) return;
   node.__terryBusCapsulePatched = true;
@@ -826,11 +805,11 @@ function patchBusNode(node) {
   node.getInputPos = function (slot) {
     if (isNodeCollapsed(this)) return originalInputPos?.apply?.(this, arguments);
     if (
-      ((nodeType(this) === UNPACK_TYPE || nodeType(this) === WIRELESS_UNPACK_TYPE) && Number(slot) === 0)
+      ((nodeType(this) === WIRELESS_UNPACK_TYPE) && Number(slot) === 0)
     ) {
       return [Number(this.pos?.[0] || 0), nodeVisualCenterY(this)];
     }
-    if (nodeType(this) === PACK_TYPE || nodeType(this) === WIRELESS_PACK_TYPE) {
+    if (nodeType(this) === WIRELESS_PACK_TYPE) {
       const input = this.inputs?.[Number(slot) || 0];
       if (input?.type === BUS_TYPE && input.link != null) {
         // Match the centered capsule in Vue, without the normal lane offset
@@ -846,14 +825,14 @@ function patchBusNode(node) {
     if (isNodeCollapsed(this)) return originalOutputPos?.apply?.(this, arguments);
     const index = Number(slot) || 0;
     if (
-      ((nodeType(this) === PACK_TYPE || nodeType(this) === WIRELESS_PACK_TYPE) && index === 0)
+      ((nodeType(this) === WIRELESS_PACK_TYPE) && index === 0)
     ) {
       return [
         Number(this.pos?.[0] || 0) + Number(this.size?.[0] || 0),
         nodeVisualCenterY(this),
       ];
     }
-    if (nodeType(this) === UNPACK_TYPE || nodeType(this) === WIRELESS_UNPACK_TYPE) {
+    if (nodeType(this) === WIRELESS_UNPACK_TYPE) {
       if (String(this.outputs?.[index]?.type || "").toUpperCase() === BUS_TYPE) {
         return [
           Number(this.pos?.[0] || 0) + Number(this.size?.[0] || 0),
@@ -883,7 +862,7 @@ function patchBusNode(node) {
     const result = originalForeground?.apply?.(this, arguments);
     if (isNodeCollapsed(this)) return result;
     try {
-      if (nodeType(this) === PACK_TYPE || nodeType(this) === WIRELESS_PACK_TYPE) {
+      if (nodeType(this) === WIRELESS_PACK_TYPE) {
         drawCapsulePort(ctx, this, true, 0);
         for (let slot = 0; slot < (this.inputs?.length || 0); slot++) {
           if (this.inputs[slot]?.type === BUS_TYPE && this.inputs[slot].link != null) {
@@ -891,7 +870,7 @@ function patchBusNode(node) {
           }
         }
       }
-      if (nodeType(this) === UNPACK_TYPE || nodeType(this) === WIRELESS_UNPACK_TYPE) {
+      if (nodeType(this) === WIRELESS_UNPACK_TYPE) {
         drawCapsulePort(ctx, this, false, 0);
         for (let slot = 0; slot < (this.outputs?.length || 0); slot++) {
           if (String(this.outputs[slot]?.type || "").toUpperCase() === BUS_TYPE) {
