@@ -2,14 +2,10 @@
 
 import asyncio
 import atexit
-import csv
 from collections import deque
 from contextlib import suppress
-import io
 import json
 import platform
-import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -37,35 +33,12 @@ def cpu_name():
     return platform.processor() or platform.machine()
 
 
-def number(value):
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return None
-
-
-def parse_smi(text):
-    devices = []
-    for row in csv.reader(io.StringIO(text), skipinitialspace=True):
-        if len(row) != 6:
-            continue
-        index, name, usage, used, total, temperature = (v.strip() for v in row)
-        devices.append({
-            "index": index, "name": name, "usage": number(usage),
-            "memory_used": number(used) * 1048576 if number(used) is not None else None,
-            "memory_total": number(total) * 1048576 if number(total) is not None else None,
-            "temperature": number(temperature),
-        })
-    return devices
-
-
 class SystemSampler:
     def __init__(self):
         self.lock = threading.Lock()
         self.cached = None
         self.sampled_at = 0
         self.name = cpu_name()
-        self.smi = shutil.which("nvidia-smi")
         self.handles = None
         self.nvml_attempted = False
 
@@ -100,17 +73,6 @@ class SystemSampler:
                     "temperature": read(nvml.nvmlDeviceGetTemperature, nvml.NVML_TEMPERATURE_GPU),
                 })
             return devices
-        if self.smi:
-            try:
-                result = subprocess.run([
-                    self.smi, "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu",
-                    "--format=csv,noheader,nounits",
-                ], capture_output=True, text=True, encoding="utf-8", timeout=2,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
-                if result.returncode == 0:
-                    return parse_smi(result.stdout)
-            except (OSError, subprocess.TimeoutExpired):
-                pass
         return []
 
     def sample(self):
