@@ -24,6 +24,12 @@ class Element {
   addEventListener(name, callback) { this.events[name] = callback; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   querySelectorAll() { return []; }
+  querySelector(selector) {
+    if (selector !== ".terry-media-add") return null;
+    const find = element => element.className === "terry-media-add"
+      ? element : element.children.map(find).find(Boolean);
+    return find(this);
+  }
   click() { this.events.click?.({}); }
 }
 
@@ -88,6 +94,7 @@ test("each media section folds independently without changing its assets or bus"
   assert.equal(node.domOptions.getMinHeight(), 700);
   toggle(node, "audio").click();
   assert.equal(section(node, "audio").classes.has("is-collapsed"), true);
+  assert.equal(section(node, "audio").children[0].children[1].hidden, true);
   assert.equal(section(node, "image").classes.has("is-collapsed"), false);
   assert.equal(toggle(node, "audio").attributes["aria-expanded"], "false");
   assert.equal(node.properties.terry_media_collapsed.audio, true);
@@ -108,13 +115,20 @@ test("folded sections and expanded node height survive workflow reload", async (
   const restored = makeNode(saved, [...node.size]);
   for (const kind of ["image", "audio", "video"]) {
     assert.ok(section(restored, kind).classes.has("is-collapsed"));
+    assert.equal(section(restored, kind).children[0].children[1].hidden, true);
   }
-  // Adding an empty slot remains available while its region is folded.
-  section(restored, "audio").children[0].children[1].click();
+  // Clicking anywhere on the header row toggles the section.
+  const audioHeader = section(restored, "audio").children[0];
+  audioHeader.events.click({ target: { closest: () => null } });
+  assert.equal(section(restored, "audio").classes.has("is-collapsed"), false);
+  assert.equal(audioHeader.children[1].hidden, false);
+  audioHeader.children[1].click();
   assert.equal(JSON.parse(restored.widgets[0].value).audio.length, 4);
-  assert.equal(section(restored, "audio").classes.has("is-collapsed"), true);
   assert.equal(busSyncs(), 1);
-  for (const kind of ["image", "audio", "video"]) toggle(restored, kind).click();
+  // The + button must not inadvertently fold the region.
+  audioHeader.events.click({ target: { closest: () => ({}) } });
+  assert.equal(section(restored, "audio").classes.has("is-collapsed"), false);
+  for (const kind of ["image", "video"]) toggle(restored, kind).click();
   assert.equal(restored.size[1], 800);
   assert.equal(restored.properties.terry_media_expanded_height, undefined);
 });
