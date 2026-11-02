@@ -7,9 +7,15 @@
 .terry-media-section[data-kind="audio"]{--media-accent:#ad9add;--media-kind-border:#8071a5;--media-kind-text:#efe7ff;--media-kind-tag:rgba(141,112,201,.24)}
 .terry-media-section[data-kind="video"]{--media-accent:#91c5a0;--media-kind-border:#648b73;--media-kind-text:#e0f6e7;--media-kind-tag:rgba(104,168,123,.22)}
 .terry-media-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
-.terry-media-section:has(.terry-media-grid:empty) .terry-media-section-head{margin-bottom:0}
+.terry-media-section:has(.terry-media-grid:empty) .terry-media-section-head,.terry-media-section.is-collapsed .terry-media-section-head{margin-bottom:0}
+.terry-media-section.is-collapsed .terry-media-grid{display:none}
 .terry-media-section h3{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--media-kind-text)}
-.terry-media-section h3 span{color:var(--media-muted);font-size:12px;font-weight:400;font-variant-numeric:tabular-nums}
+.terry-media-count{color:var(--media-muted);font-size:12px;font-weight:400;font-variant-numeric:tabular-nums}
+.terry-media-toggle{display:flex;align-items:center;gap:8px;min-height:28px;padding:0;border:0;background:transparent;color:var(--media-kind-text);font:inherit;cursor:pointer;text-align:left}
+.terry-media-toggle:hover{color:var(--media-text)}
+.terry-media-chevron{display:inline-flex;align-items:center;justify-content:center;width:12px;color:var(--media-muted);font-size:13px;transition:transform .15s ease}
+.terry-media-section.is-collapsed .terry-media-chevron{transform:rotate(-90deg)}
+@media (prefers-reduced-motion:reduce){.terry-media-chevron{transition:none}}
 .terry-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
 .terry-media-grid:empty{display:none}
 .terry-media-card{box-sizing:border-box;min-width:0;min-height:172px;padding:8px;border:1px solid var(--media-kind-border);border-radius:12px;background:var(--media-surface);color:var(--media-text);cursor:grab;overflow:hidden}
