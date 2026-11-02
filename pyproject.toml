@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-terryxu-nodes"
 version = "1.0.0"
-description = "ComfyUI workflow utilities: H3 prompt editor, media loading, wiring, switches, file saving, and performance monitoring."
+description = "ComfyUI workflow utilities: H3 prompt editor, media loading, wiring, switches, memory cleanup, and performance monitoring."
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 dependencies = [
@@ -20,3 +20,5 @@ Documentation = "https://github.com/terry-xu-2077/ComfyUI-TerryXu-nodes#readme"
 [tool.comfy]
 PublisherId = "terryxu"
 DisplayName = "TerryXu"
+Icon = "https://raw.githubusercontent.com/terry-xu-2077/ComfyUI-TerryXu-nodes/main/assets/icon.png"
+Banner = "https://raw.githubusercontent.com/terry-xu-2077/ComfyUI-TerryXu-nodes/main/assets/banner.jpg"
