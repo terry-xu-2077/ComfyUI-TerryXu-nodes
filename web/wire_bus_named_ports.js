@@ -1,7 +1,5 @@
 import { app } from "../../scripts/app.js";
 
-const PACK_TYPE = "TerryXuWireBusPack";
-const UNPACK_TYPE = "TerryXuWireBusUnpack";
 const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
 const WIRELESS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
 const BUS_TYPE = "TERRY_WIRE_BUS";
@@ -14,8 +12,8 @@ function nodeType(node) {
   return String(node?.comfyClass || node?.type || node?.constructor?.comfyClass || node?.constructor?.type || "");
 }
 
-function isPack(node) { return [PACK_TYPE, WIRELESS_PACK_TYPE].includes(nodeType(node)); }
-function isUnpack(node) { return [UNPACK_TYPE, WIRELESS_UNPACK_TYPE].includes(nodeType(node)); }
+function isPack(node) { return nodeType(node) === WIRELESS_PACK_TYPE; }
+function isUnpack(node) { return nodeType(node) === WIRELESS_UNPACK_TYPE; }
 function isReroute(node) {
   const type = nodeType(node).toLowerCase();
   return type === "reroute" || type.endsWith("reroute");
@@ -152,8 +150,7 @@ function findPackForUnpack(unpack) {
     }
     return null;
   }
-  const source = resolveSource(unpack?.graph, unpack?.inputs?.[0]?.link);
-  return source && nodeType(source.node) === PACK_TYPE ? source.node : null;
+  return null;
 }
 
 function applyNames(pack) {
@@ -195,7 +192,7 @@ app.registerExtension({
   name: "TerryXu.WireBusNamedPorts",
 
   beforeRegisterNodeDef(nodeType, nodeData) {
-    if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE].includes(nodeData?.name)) return;
+    if (![WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE].includes(nodeData?.name)) return;
 
     const oldConnections = nodeType.prototype.onConnectionsChange;
     nodeType.prototype.onConnectionsChange = function () {

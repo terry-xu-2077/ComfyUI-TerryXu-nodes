@@ -1,7 +1,6 @@
 import { app } from "../../scripts/app.js";
 
 const BUS_PACK_TYPES = new Set([
-  "TerryXuWireBusPack",
   "TerryXuWirelessBusPack",
 ]);
 

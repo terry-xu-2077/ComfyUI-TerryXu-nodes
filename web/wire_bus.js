@@ -2,8 +2,6 @@ import { app } from "../../scripts/app.js";
 import { mediaExecutionSource } from "./media_loader_model.mjs";
 
 // Stable workflow ids. Never localize these.
-const PACK_TYPE = "TerryXuWireBusPack";
-const UNPACK_TYPE = "TerryXuWireBusUnpack";
 const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
 const WIRELESS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
 const BUS_TYPE = "TERRY_WIRE_BUS";
@@ -34,10 +32,9 @@ const WIRELESS_CONTROL_STYLE_ID = "terry-wireless-bus-control-style";
 const OUTPUT_MODE_CONTROL_HEIGHT = 30;
 const OUTPUT_MODE_CONTROL_MARGIN = 4;
 const OUTPUT_MODE_STYLE_ID = "terry-wire-bus-output-mode-style";
-const BUS_ONLY_WIRED_HEIGHT = 110;
 const BUS_ONLY_WIRELESS_HEIGHT = 140;
 
-const H3_TYPES = new Set(["TerryXuH3PromptEditor", "TerryXuH3ShotTimeline"]);
+const H3_TYPES = new Set(["TerryXuH3PromptEditor"]);
 
 let laneSequence = 0;
 
@@ -66,14 +63,14 @@ function isChineseLocale() {
 function labels() {
   if (isChineseLocale()) {
     return {
-      packTitle: "↔️ 总线-入",
-      unpackTitle: "↔️ 总线-出",
-      wirelessPackTitle: "↔️ 总线-入",
-      wirelessUnpackTitle: "↔️ 总线-出",
+      
+      
+      wirelessPackTitle: "⛓️‍💥 无线总线-入",
+      wirelessUnpackTitle: "⛓️‍💥 无线总线-出",
       packDescription: "将任意数量、任意类型的连接汇总为一根虚拟总线，支持 KJNodes Get/Set。",
       unpackDescription: "从虚拟总线自动恢复原始连接的数量、类型和顺序，支持 KJNodes Get/Set。",
-      wirelessPackDescription: "汇总多路连接；既可从总线端口有线连出，也可通过 TerryXu 频道无线发布。",
-      wirelessUnpackDescription: "既可从总线端口有线接收，也可选择 TerryXu 频道无线接收，并自动恢复多路连接。",
+      wirelessPackDescription: "将多路连接整理成总线，通过 TerryXu 频道发布。",
+      wirelessUnpackDescription: "按 TerryXu 频道接收总线，自动恢复多路连接；也可读取媒体加载器的总线。",
       category: "TerryXu/线束整理",
       addWire: "添加线束",
       bus: "总线",
@@ -86,14 +83,14 @@ function labels() {
     };
   }
   return {
-    packTitle: "↔️ Bus-In",
-    unpackTitle: "↔️ Bus-Out",
-    wirelessPackTitle: "↔️ Bus-In",
-    wirelessUnpackTitle: "↔️ Bus-Out",
+    
+    
+    wirelessPackTitle: "⛓️‍💥 Wireless Bus In",
+    wirelessUnpackTitle: "⛓️‍💥 Wireless Bus Out",
     packDescription: "Bundle any number of connections into one virtual bus. Supports KJNodes Get/Set.",
     unpackDescription: "Restore the original connection count, types and order from a virtual bus. Supports KJNodes Get/Set.",
-    wirelessPackDescription: "Bundle multiple connections and expose them through both a wired BUS output and a TerryXu wireless channel.",
-    wirelessUnpackDescription: "Restore a bus from either the wired BUS input or a TerryXu wireless channel.",
+    wirelessPackDescription: "Group multiple connections and publish them over a TerryXu wireless channel.",
+    wirelessUnpackDescription: "Restore connections from a TerryXu wireless channel, or read a Media Loader bus.",
     category: "TerryXu/Wire Management",
     addWire: "Add wire",
     bus: "bus",
@@ -112,14 +109,12 @@ function nodeType(node) {
   );
 }
 
-function isWiredPack(node) { return nodeType(node) === PACK_TYPE; }
-function isWiredUnpack(node) { return nodeType(node) === UNPACK_TYPE; }
 function isWirelessPack(node) { return nodeType(node) === WIRELESS_PACK_TYPE; }
 function isWirelessUnpack(node) { return nodeType(node) === WIRELESS_UNPACK_TYPE; }
 function isWireless(node) { return isWirelessPack(node) || isWirelessUnpack(node); }
 function isMediaPack(node) { return nodeType(node) === "TerryXuMediaLoader"; }
-function isPack(node) { return isWiredPack(node) || isWirelessPack(node) || isMediaPack(node); }
-function isUnpack(node) { return isWiredUnpack(node) || isWirelessUnpack(node); }
+function isPack(node) { return isWirelessPack(node) || isMediaPack(node); }
+function isUnpack(node) { return isWirelessUnpack(node); }
 
 function isReroute(node) {
   const type = nodeType(node).toLowerCase();
@@ -147,7 +142,6 @@ function isH3MediaTarget(node, input) {
 function canConnectBusOutput(targetNode, input) {
   return (
     isUnpack(targetNode)
-    || isWiredPack(targetNode)
     || isWirelessPack(targetNode)
     || nodeType(targetNode) === LIST_TYPE
     || isReroute(targetNode)
@@ -861,11 +855,7 @@ function findPackFromUnpack(unpack) {
     return wirelessPacksInScope(unpack.graph || app.graph)
       .find((node) => wirelessChannelName(node) === name) || null;
   }
-  if (!isWiredUnpack(unpack)) return null;
-  const linkId = unpack?.inputs?.[0]?.link;
-  if (!unpack?.graph || linkId == null) return null;
-  const upstream = resolveUpstream(unpack.graph, linkId);
-  return upstream && isPack(upstream.node) ? upstream.node : null;
+  return null;
 }
 
 function storedPackLanes(pack) {
@@ -1092,19 +1082,7 @@ function signatureForEntries(entries) {
 
 function localizeFixedPorts(node, updateTitle = false) {
   const text = labels();
-  if (isWiredPack(node)) {
-    const out = node.outputs?.[0];
-    if (out) { out.name = "bus"; out.label = text.bus; out.type = BUS_TYPE; }
-    if (updateTitle) node.title = text.packTitle;
-  } else if (isWiredUnpack(node)) {
-    const input = node.inputs?.[0];
-    if (input) { input.name = "bus"; input.label = text.bus; input.type = BUS_TYPE; }
-    if (!unpackExpanded(node)) {
-      const out = node.outputs?.[0];
-      if (out) { out.name = "bus"; out.label = text.bus; out.type = BUS_TYPE; }
-    }
-    if (updateTitle) node.title = text.unpackTitle;
-  } else if (isWirelessPack(node)) {
+  if (isWirelessPack(node)) {
     const out = node.outputs?.[0];
     if (out) { out.name = "bus"; out.label = text.bus; out.type = BUS_TYPE; }
     const widget = wirelessChannelWidget(node);
@@ -1139,13 +1117,12 @@ function compactBusNodeHeight(laneCount) {
 function controlBlockHeight(node) {
   if (isWirelessUnpack(node)) return 40 + OUTPUT_MODE_CONTROL_HEIGHT;
   if (isWirelessPack(node)) return 40;
-  if (isWiredUnpack(node)) return OUTPUT_MODE_CONTROL_HEIGHT;
   return 0;
 }
 
 function compactBusNodeMinimumHeight(node, laneCount) {
   if (isUnpack(node) && !unpackExpanded(node)) {
-    return isWirelessUnpack(node) ? BUS_ONLY_WIRELESS_HEIGHT : BUS_ONLY_WIRED_HEIGHT;
+    return BUS_ONLY_WIRELESS_HEIGHT;
   }
   const slotHeight = Math.max(16, Number(globalThis.LiteGraph?.NODE_SLOT_HEIGHT) || 20);
   const visibleSlots = Math.max(1, Number(laneCount) || 0) + (isPack(node) ? 1 : 0);
@@ -1166,7 +1143,7 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
 
   const busOnly = isUnpack(node) && !unpackExpanded(node);
   const fixedBusOnlyHeight = busOnly
-    ? (isWirelessUnpack(node) ? BUS_ONLY_WIRELESS_HEIGHT : BUS_ONLY_WIRED_HEIGHT)
+    ? BUS_ONLY_WIRELESS_HEIGHT
     : 0;
 
   const minHeight = busOnly
@@ -1188,8 +1165,7 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   const width = initialized ? Math.max(COMPACT_NODE_WIDTH, currentWidth) : COMPACT_NODE_WIDTH;
 
   const inheritsPairedHeight = !busOnly && (
-    (isUnpack(node) && isPack(pairedPack) && !isMediaPack(pairedPack))
-    || (isWirelessPack(node) && isWiredPack(pairedPack))
+    (isUnpack(node) && isWirelessPack(pairedPack))
   );
 
   let pairedHeight = 0;
@@ -1215,26 +1191,6 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
 
   node.__terryBusExpandedSize = [width, height];
   if (!node.flags?.collapsed) node.setSize?.([width, height]);
-}
-
-function syncWirelessBridgePackHeight(pack, publishedEntries = null) {
-  if (!isWirelessPack(pack)) return;
-  const bridgeInput = (pack.inputs || []).find((input) =>
-    input?.type === BUS_TYPE && input.link != null
-  );
-  if (!bridgeInput) return;
-  const upstreamPack = resolveUpstream(pack.graph, bridgeInput.link)?.node;
-  if (!isWiredPack(upstreamPack)) return;
-
-  const entries = publishedEntries || effectivePackLaneEntries(pack);
-  const upstreamHeightChanged = Math.abs(
-    Number(pack.size?.[1] || 0) - Number(upstreamPack.size?.[1] || 0)
-  ) > 0.5;
-  if (pack.__terryBusPublishedLaneCount === entries.length && !upstreamHeightChanged) return;
-
-  resizeCompactBusNode(pack, entries.length, upstreamPack);
-  pack.__terryBusPublishedLaneCount = entries.length;
-  pack.__terryBusRefreshVisual?.();
 }
 
 function ensureUnpackBusOutput(unpack) {
@@ -1296,11 +1252,10 @@ function syncUnpack(unpack, force = false) {
 
     const pack = findPackFromUnpack(unpack);
     const entries = pack ? effectivePackLaneEntries(pack) : [];
-    syncWirelessBridgePackHeight(pack, entries);
 
     if (!unpackExpanded(unpack)) {
       const signature = `BUS:${String(pack?.id ?? "")}:${wirelessChannelName(unpack)}`;
-      const targetHeight = isWirelessUnpack(unpack) ? BUS_ONLY_WIRELESS_HEIGHT : BUS_ONLY_WIRED_HEIGHT;
+      const targetHeight = BUS_ONLY_WIRELESS_HEIGHT;
       const busOutputReady = (unpack.outputs?.length || 0) === 1
         && String(unpack.outputs?.[0]?.type || "").toUpperCase() === BUS_TYPE
         && unpack.outputs?.[0]?.[BUS_OUTPUT_FIELD] === true;
@@ -1711,7 +1666,6 @@ function startBridge() {
 
         if (isPack(node)) {
           localizeFixedPorts(node, localeChanged);
-          if (isWirelessPack(node)) syncWirelessBridgePackHeight(node);
           const last = node.inputs?.[node.inputs.length - 1];
           if (last?.link == null && last?.type === EMPTY_TYPE) last.label = labels().addWire;
         }
@@ -1793,9 +1747,9 @@ app.registerExtension({
       };
       return;
     }
-    if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE].includes(nodeName)) return;
+    if (![WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE].includes(nodeName)) return;
 
-    const isPackDef = nodeName === PACK_TYPE || nodeName === WIRELESS_PACK_TYPE;
+    const isPackDef = nodeName === WIRELESS_PACK_TYPE;
     const isWirelessDef = nodeName === WIRELESS_PACK_TYPE || nodeName === WIRELESS_UNPACK_TYPE;
 
     const originalCollapse = nodeType.prototype.collapse;

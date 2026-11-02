@@ -71,31 +71,8 @@
       }
     }
   },
-  "TerryXuWireBusPack": {
-    "display_name": "↔️ 总线-入",
-    "description": "将任意数量、任意类型的连接汇总为一根虚拟总线，支持 KJNodes Get/Set。",
-    "inputs": {
-      "wire": {
-        "name": "添加线束"
-      }
-    },
-    "outputs": {
-      "0": {
-        "name": "总线"
-      }
-    }
-  },
-  "TerryXuWireBusUnpack": {
-    "display_name": "↔️ 总线-出",
-    "description": "从虚拟总线自动恢复原始连接的数量、类型和顺序，支持 KJNodes Get/Set。",
-    "inputs": {
-      "bus": {
-        "name": "总线"
-      }
-    }
-  },
   "TerryXuWirelessBusPack": {
-    "display_name": "↔️ 总线-入",
+    "display_name": "⛓️‍💥 无线总线-入",
     "description": "将多路连接发布到独立的 TerryXu 无线总线频道，不与 KJNodes Get/Set 混用。",
     "inputs": {
       "wire": {
@@ -104,7 +81,31 @@
     }
   },
   "TerryXuWirelessBusUnpack": {
-    "display_name": "↔️ 总线-出",
+    "display_name": "⛓️‍💥 无线总线-出",
     "description": "选择 TerryXu 无线总线频道，自动恢复对应的多路连接。"
+  },
+  "TerryXuLineSwitch": {
+    "display_name": "*️⃣ 多线切换器",
+    "description": "通过线路序号或外接整数选择输入线路。"
+  },
+  "TerryXuBoolSwitch": {
+    "display_name": "🔀 二路切换器",
+    "description": "由布尔值在两路输入之间切换。"
+  },
+  "TerryXuRemoteControl": {
+    "display_name": "🎛️ 远程控制器",
+    "description": "按频道联动线路切换器和布尔开关。"
+  },
+  "TerryXuMediaLoader": {
+    "display_name": "媒体加载器",
+    "description": "管理图片、音频及视频资产，输出有序总线。"
+  },
+  "TerryXuMediaBusItem": {
+    "display_name": "媒体总线资产",
+    "description": "媒体加载器使用的内部资产解码节点。"
+  },
+  "TerryXuBusToList": {
+    "display_name": "总线转列表",
+    "description": "将媒体或无线总线转换为有序的 ComfyUI 列表。"
   }
 }

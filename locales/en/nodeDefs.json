@@ -71,31 +71,8 @@
       }
     }
   },
-  "TerryXuWireBusPack": {
-    "display_name": "↔️ Bus-In",
-    "description": "Bundle any number of connections into one virtual bus. Supports KJNodes Get/Set.",
-    "inputs": {
-      "wire": {
-        "name": "Add Wire"
-      }
-    },
-    "outputs": {
-      "0": {
-        "name": "Bus"
-      }
-    }
-  },
-  "TerryXuWireBusUnpack": {
-    "display_name": "↔️ Bus-Out",
-    "description": "Restore the original connection count, types and order from a virtual bus. Supports KJNodes Get/Set.",
-    "inputs": {
-      "bus": {
-        "name": "Bus"
-      }
-    }
-  },
   "TerryXuWirelessBusPack": {
-    "display_name": "↔️ Bus-In",
+    "display_name": "⛓️‍💥 Wireless Bus In",
     "description": "Publish multiple connections to an independent TerryXu wireless bus channel.",
     "inputs": {
       "wire": {
@@ -104,7 +81,31 @@
     }
   },
   "TerryXuWirelessBusUnpack": {
-    "display_name": "↔️ Bus-Out",
+    "display_name": "⛓️‍💥 Wireless Bus Out",
     "description": "Select a TerryXu wireless bus channel and restore all of its connections."
+  },
+  "TerryXuLineSwitch": {
+    "display_name": "Multi-Route Switch",
+    "description": "Select a route by index or external INT control."
+  },
+  "TerryXuBoolSwitch": {
+    "display_name": "Two-Way Switch",
+    "description": "Select between two inputs with a Boolean control."
+  },
+  "TerryXuRemoteControl": {
+    "display_name": "Remote Control",
+    "description": "Control linked switches and routing via a selected channel."
+  },
+  "TerryXuMediaLoader": {
+    "display_name": "Media Loader",
+    "description": "Manage image, audio and video assets and expose an ordered bus."
+  },
+  "TerryXuMediaBusItem": {
+    "display_name": "Media Bus Asset",
+    "description": "Internal asset decoder for Media Loader."
+  },
+  "TerryXuBusToList": {
+    "display_name": "Bus to List",
+    "description": "Expand a media or wireless bus to an ordered ComfyUI list."
   }
 }
