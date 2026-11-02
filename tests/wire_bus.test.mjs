@@ -32,3 +32,27 @@ test("connected bus cable endpoints align with centered capsules, while individu
   }
 });
 
+
+test("only wireless channel bus nodes are registered", async () => {
+  const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  let extension;
+  const app = {
+    graph: { _nodes: [] },
+    ui: { settings: { getSettingValue: () => "zh-CN" } },
+    registerExtension(value) { extension = value; },
+  };
+  const context = vm.createContext({
+    app, mediaExecutionSource, navigator: { language: "zh-CN" },
+    LiteGraph: { INPUT: 1, OUTPUT: 2 }, queueMicrotask() {},
+  });
+  vm.runInContext(source, context);
+
+  const defs = {};
+  extension.addCustomNodeDefs(defs);
+  assert.deepEqual(Object.keys(defs).sort(), [
+    "TerryXuWirelessBusPack", "TerryXuWirelessBusUnpack",
+  ]);
+  assert.equal(defs.TerryXuWirelessBusPack.display_name, "⛓️‍💥 无线总线-入");
+  assert.equal(defs.TerryXuWirelessBusUnpack.display_name, "⛓️‍💥 无线总线-出");
+});
