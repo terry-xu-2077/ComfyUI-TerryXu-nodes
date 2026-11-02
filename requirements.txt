@@ -1,3 +1,4 @@
 # External runtime dependencies. ComfyUI supplies torch, aiohttp, and comfy_api.
 psutil>=5.9.0,<8
 typing-extensions>=4.8.0
+nvidia-ml-py>=12.535.133,<14
