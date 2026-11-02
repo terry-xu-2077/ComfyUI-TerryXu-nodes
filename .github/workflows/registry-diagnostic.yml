@@ -45,7 +45,7 @@ jobs:
           for url in \
             "https://api.comfy.org/nodes/comfyui-terryxu-nodes" \
             "https://api.comfy.org/nodes/comfyui-terryxu-nodes/versions?include_status_reason=true" \
-            "https://api.comfy.org/nodes/comfyui-terryxu-nodes/install?version=1.0.0"
+            "https://api.comfy.org/nodes/comfyui-terryxu-nodes/install?version=1.0.1"
           do
             echo
             echo "===== $url ====="
