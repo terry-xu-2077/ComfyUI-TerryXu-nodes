@@ -7,7 +7,7 @@ export const H3_WIRELESS_BUS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
 export const H3_WIRED_BUS_UNPACK_TYPE = "TerryXuWireBusUnpack";
 export const H3_MEDIA_TYPES = new Set(["IMAGE", "VIDEO", "AUDIO"]);
 
-const H3_BUS_PACK_TYPES = new Set([H3_BUS_PACK_TYPE, H3_WIRED_BUS_PACK_TYPE]);
+const H3_BUS_PACK_TYPES = new Set([H3_BUS_PACK_TYPE, H3_WIRED_BUS_PACK_TYPE, "TerryXuMediaLoader"]);
 const H3_BUS_UNPACK_TYPES = new Set([H3_WIRELESS_BUS_UNPACK_TYPE, H3_WIRED_BUS_UNPACK_TYPE]);
 
 export function h3NodeType(node) {
@@ -325,11 +325,28 @@ export function h3IsBusLinkInfo(node, linkInfo) {
   return false;
 }
 
+function collectLoaderMedia(pack, result, seenMedia, path = null) {
+  if (h3NodeType(pack) !== "TerryXuMediaLoader") return false;
+  const executionId = path ? h3ExecutionId(path, pack.id) : String(pack.id);
+  for (const entry of pack.__terryBusLaneEntries?.() || []) {
+    if (!entry.source || entry.empty || !H3_MEDIA_TYPES.has(entry.type)) continue;
+    const key = `${executionId}:media:${entry.laneId}`;
+    if (seenMedia.has(key)) continue;
+    seenMedia.add(key);
+    result.push({ source_id: Number(pack.id), source_slot: 0, source_type: entry.type,
+      kind: h3MediaKind(entry.type), asset_id: entry.laneId, asset: entry.asset,
+      ...(path ? { source_execution_id: executionId } : {}),
+    });
+  }
+  return true;
+}
+
 function collectPackMedia(pack, result, seenMedia, seenPacks) {
   if (!pack?.graph) return;
   const packKey = `${h3NodeType(pack)}:${String(pack.id)}`;
   if (seenPacks.has(packKey)) return;
   seenPacks.add(packKey);
+  if (collectLoaderMedia(pack, result, seenMedia)) return;
 
   for (const input of pack.inputs || []) {
     if (input?.link == null) continue;
@@ -368,7 +385,8 @@ export function h3CollectBusMedia(node) {
 
 export function h3BusSignature(node) {
   return h3CollectBusMedia(node)
-    .map((item) => `${item.source_id}:${item.source_slot}:${item.source_type}`)
+    .map((item) => JSON.stringify([item.source_id, item.source_slot, item.source_type,
+      item.asset_id, item.asset?.path, item.asset?.source]))
     .join("|");
 }
 
@@ -486,6 +504,7 @@ function collectPackMediaForExecution(pack, path, result, seenMedia, seenPacks) 
   const packKey = `${path.join(":")}:${h3NodeType(pack)}:${String(pack.id)}`;
   if (seenPacks.has(packKey)) return;
   seenPacks.add(packKey);
+  if (collectLoaderMedia(pack, result, seenMedia, path)) return;
 
   for (const input of pack.inputs || []) {
     if (input?.link == null) continue;

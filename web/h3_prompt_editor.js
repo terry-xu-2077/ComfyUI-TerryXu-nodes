@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { mediaExecutionSource } from "./media_loader_model.mjs";
 import { attachH3Menus } from "./h3_shared_menus.js";
 import {
   bindH3TagInteractions,
@@ -105,15 +106,16 @@ function normalizeLinks(node) {
     const src = graph?.getNodeById?.(id);
     // Graph restore may configure this editor before its source nodes exist.
     // Keep unresolved links inert until their origin nodes become available.
-    const kind = sourceType(src, slot, link?.source_type);
-    const key = `${id}:${slot}`;
+    const kind = link.asset_id ? link.kind : sourceType(src, slot, link?.source_type);
+    const key = `${id}:${slot}:${link.asset_id || ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({
       source_id: id,
       source_slot: slot,
-      source_type: String(src?.outputs?.[slot]?.type || link?.source_type || "*"),
+      source_type: String(link.asset_id ? link.source_type : src?.outputs?.[slot]?.type || link?.source_type || "*"),
       kind,
+      ...(link.asset_id ? { asset_id: link.asset_id, asset: link.asset } : {}),
     });
   }
   node.properties[LINKS_PROP] = out.slice(0, MAX_MEDIA);
@@ -282,7 +284,9 @@ function patchGraphToPrompt() {
       const executionId = Number(executionSource?.id);
       if (!executionSource || !Number.isFinite(executionId) || !output[String(executionId)]) continue;
       assetIndex += 1;
-      dst.inputs[`asset${assetIndex}`] = [String(executionId), Number(resolved.slot) || 0];
+      dst.inputs[`asset${assetIndex}`] = link.asset_id
+        ? mediaExecutionSource(output, { assetId: link.asset_id }, String(executionId))
+        : [String(executionId), Number(resolved.slot) || 0];
     }
     }
     return data;
@@ -370,6 +374,10 @@ function transparentMediaInputIndex(node, outputSlot = 0) {
 function expandDisplayMediaSources(node, slot = 0, route = "", ancestors = new Set()) {
   if (!node) return [];
   if (ancestors.has(node) || ancestors.size >= 24) return [];
+  if (typeof node.__terryBusListEntries === "function") {
+    return node.__terryBusListEntries().map(entry => ({ node: entry.source.node,
+      slot: entry.source.slot, asset: entry.asset, type: entry.type, route: route + entry.laneId }));
+  }
   const list = isMediaListNode(node);
   const passThroughIndex = list ? -1 : transparentMediaInputIndex(node, slot);
   if (!list && passThroughIndex < 0) return [{ node, slot, route }];
@@ -408,11 +416,16 @@ function graphMediaOptions(node) {
   for (const link of normalizeLinks(node)) {
     const displaySource = graph?.getNodeById?.(Number(link.source_id));
     const resolved = resolveVirtualMediaSource(displaySource, link.source_slot, link.source_type);
-    for (const entry of expandDisplayMediaSources(resolved.node || displaySource, resolved.slot)) {
+    const sources = link.asset_id
+      ? [{ node: displaySource, slot: link.source_slot, asset: link.asset, type: link.source_type, route: link.asset_id }]
+      : expandDisplayMediaSources(resolved.node || displaySource, resolved.slot);
+    for (const entry of sources) {
       const src = entry.node;
       if (!src) continue;
       const slot = Number(entry.slot) || 0;
-      const kind = sourceType(src, slot, src.outputs?.[slot]?.type || resolved.type || link.source_type);
+      const kind = entry.asset
+        ? (entry.type === "VIDEO" ? "video" : entry.type === "AUDIO" ? "audio" : "picture")
+        : sourceType(src, slot, src.outputs?.[slot]?.type || resolved.type || link.source_type);
       const index = ++counts[kind];
       const english = kind === "picture" ? "Picture" : kind === "video" ? "Video" : "Audio";
       const label = english + " " + index;
@@ -420,8 +433,13 @@ function graphMediaOptions(node) {
       entries.push({
         key: String(link.source_id) + ":" + String(link.source_slot) + (entry.route ? "/" + entry.route : ""),
         kind, index, tag: "<" + label + ">", label,
-        source: filenameFromSource(src, kind).split(/[\\/]/).pop() || src.title || label,
-        preview: previewFromSource(src, kind),
+        source: entry.asset?.name || entry.asset?.path?.split("/").pop()
+          || filenameFromSource(src, kind).split(/[\\/]/).pop() || src.title || label,
+        preview: entry.asset?.path ? api.apiURL(`/view?${new URLSearchParams({
+          filename: entry.asset.path.split("/").pop(),
+          subfolder: entry.asset.path.split("/").slice(0, -1).join("/"),
+          type: entry.asset.source || "input",
+        })}`) : previewFromSource(src, kind),
       });
     }
   }

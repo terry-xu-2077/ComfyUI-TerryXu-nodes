@@ -7,6 +7,7 @@ const UNPACK_TYPE = "TerryXuWireBusUnpack";
 const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
 const WIRELESS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
 const BUS_TYPE = "TERRY_WIRE_BUS";
+const LIST_TYPE = "TerryXuBusToList";
 const EMPTY_TYPE = "*";
 
 const PACK_LANES_PROPERTY = "terry_wire_bus_lanes";
@@ -148,6 +149,7 @@ function canConnectBusOutput(targetNode, input) {
     isUnpack(targetNode)
     || isWiredPack(targetNode)
     || isWirelessPack(targetNode)
+    || nodeType(targetNode) === LIST_TYPE
     || isReroute(targetNode)
     || isSet(targetNode)
     || isH3MediaTarget(targetNode, input)
@@ -1506,6 +1508,83 @@ function executionPromptSource(prompt, source, current) {
   return [sourceId, sourceSlot];
 }
 
+function listBusEntries(node) {
+  const upstream = resolveUpstream(node.graph, node.inputs?.find(input => input.name === "bus")?.link);
+  return upstream && isPack(upstream.node) ? effectivePackLaneEntries(upstream.node) : [];
+}
+
+function syncBusList(node) {
+  const entries = listBusEntries(node).filter(entry => entry.source && !entry.empty);
+  const names = { IMAGE: "图片", AUDIO: "音频", VIDEO: "视频", MASK: "遮罩",
+    STRING: "文本", INT: "整数", FLOAT: "小数", BOOLEAN: "布尔" };
+  const counts = new Map();
+  for (const entry of entries) counts.set(entry.type, (counts.get(entry.type) || 0) + 1);
+  const summary = [...counts].map(([type, count]) => `${isChineseLocale() ? names[type] || type : type} ${count}`).join(" · ");
+  const text = !entries.length ? (isChineseLocale() ? "未识别到数据" : "No data detected")
+    : `${counts.size > 1 ? (isChineseLocale() ? "混合：" : "Mixed: ") : ""}${summary}`;
+  const info = node.__terryBusListInfo;
+  if (info && info.title !== text) {
+    info.title = text;
+    if (typeof document === "undefined" || !info.replaceChildren) info.textContent = text;
+    else {
+      info.setAttribute("aria-label", text);
+      info.replaceChildren();
+      if (!entries.length) info.textContent = text;
+      const colors = { IMAGE: "#85b7eb", AUDIO: "#b49be1", VIDEO: "#8ac5ac" };
+      for (const [type, count] of counts) {
+        const item = document.createElement("span");
+        item.style.cssText = "display:inline-flex;align-items:center;gap:7px;white-space:nowrap;";
+        const dot = document.createElement("span");
+        dot.style.cssText = `width:5px;height:5px;border-radius:50%;background:${colors[type] || "#aeb8c4"};flex:none;`;
+        const label = document.createElement("span");
+        label.textContent = isChineseLocale() ? names[type] || type : type;
+        label.style.cssText = "color:var(--descrip-text,#b1b6bf);font-size:12px;";
+        const number = document.createElement("span");
+        number.textContent = String(count);
+        number.style.cssText = "color:var(--input-text,#e7eaf0);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;";
+        item.append(dot, label, number);
+        info.append(item);
+      }
+    }
+  }
+  const output = node.outputs?.[0];
+  if (output) {
+    output.type = counts.size === 1 ? entries[0].type : EMPTY_TYPE;
+    output.name = isChineseLocale() ? "列表" : "List";
+    output.label = output.name;
+    for (const link of output.links || []) syncConnectionType(node.graph, link, output.type);
+  }
+  return entries;
+}
+
+function initializeBusList(node) {
+  if (!node.__terryBusListInfo && typeof document !== "undefined" && node.addDOMWidget) {
+    const info = document.createElement("div");
+    info.style.cssText = "display:flex;align-items:center;flex-wrap:wrap;gap:8px 15px;width:calc(100% - 12px);margin:3px 6px;min-height:42px;padding:9px 11px;border:1px solid rgba(170,183,203,.16);border-radius:8px;background:rgba(12,16,22,.2);color:var(--descrip-text,#b1b6bf);font:12px/1.5 Inter,system-ui,sans-serif;box-sizing:border-box;";
+    const widget = node.addDOMWidget("terry_bus_list_info", "div", info, { serialize: false });
+    widget.computeSize = width => [width, Math.max(48, Math.ceil((info.title?.length || 0) * 7 / Math.max(100, width - 40)) * 22 + 22)];
+    node.__terryBusListInfo = info;
+  }
+  syncBusList(node);
+}
+
+function expandBusListPrompt(graph, prompt) {
+  for (const node of graph?._nodes || []) {
+    if (nodeType(node) !== LIST_TYPE) continue;
+    const target = prompt[String(node.id)];
+    if (!target) continue;
+    const entries = syncBusList(node);
+    if (entries.length > 100) throw new Error("总线转列表最多支持 100 个非空项，请拆分总线后重试。");
+    target.inputs ||= {};
+    delete target.inputs.bus;
+    for (const key of Object.keys(target.inputs)) if (key.startsWith("items.item_")) delete target.inputs[key];
+    entries.forEach((entry, index) => {
+      const source = executionPromptSource(prompt, entry.source, null);
+      if (source) target.inputs[`items.item_${index}`] = source;
+    });
+  }
+}
+
 function patchGraphToPrompt() {
   if (app.__terryWireBusPatched) return;
   app.__terryWireBusPatched = true;
@@ -1519,6 +1598,7 @@ function patchGraphToPrompt() {
       if (!prompt) return result;
 
       for (const graph of allGraphs(this.graph || app.graph)) {
+        expandBusListPrompt(graph, prompt);
         for (const unpack of graph?._nodes || []) {
           if (!isUnpack(unpack) || !unpackExpanded(unpack)) continue;
           const pack = findPackFromUnpack(unpack);
@@ -1579,6 +1659,7 @@ function startBridge() {
 
     for (const graph of allGraphs()) {
       for (const node of graph?._nodes || []) {
+        if (nodeType(node) === LIST_TYPE) syncBusList(node);
         if (isWireless(node)) {
           initializeWirelessControl(node);
           if (localeChanged) node.__terryWirelessControl?.refresh?.();
@@ -1644,6 +1725,30 @@ app.registerExtension({
 
   beforeRegisterNodeDef(nodeType, nodeData) {
     const nodeName = nodeData.name;
+    if (nodeName === LIST_TYPE) {
+      // Public, read-only provenance API for reference pickers such as Flow's
+      // @ menu. It exposes current order without changing the execution list.
+      nodeType.prototype.__terryBusListEntries = function () {
+        return listBusEntries(this).filter(entry => entry.source && !entry.empty);
+      };
+      // The server's dynamic inputs are populated from the bus at queue time;
+      // only the single bus socket belongs in the visible node UI.
+      if (nodeData.input?.optional) delete nodeData.input.optional.items;
+      const originalCreated = nodeType.prototype.onNodeCreated;
+      nodeType.prototype.onNodeCreated = function () {
+        const result = originalCreated?.apply(this, arguments);
+        initializeBusList(this);
+        this.setSize?.([260, Math.max(100, Number(this.size?.[1]) || 0)]);
+        return result;
+      };
+      const originalConnections = nodeType.prototype.onConnectionsChange;
+      nodeType.prototype.onConnectionsChange = function () {
+        const result = originalConnections?.apply(this, arguments);
+        queueMicrotask(() => syncBusList(this));
+        return result;
+      };
+      return;
+    }
     if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE].includes(nodeName)) return;
 
     const isPackDef = nodeName === PACK_TYPE || nodeName === WIRELESS_PACK_TYPE;

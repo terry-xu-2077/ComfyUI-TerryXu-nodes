@@ -44,7 +44,7 @@ export function mediaLanes(node, groups) {
   return MEDIA_KINDS.flatMap(kind => groups[kind].map((asset, index) => {
     const name = `${MEDIA_LABELS[kind]} ${index + 1}`;
     const lane = { id: asset.id, type: MEDIA_TYPES[kind], name };
-    return { laneId: asset.id, lane, name, type: lane.type, empty: asset.empty === true,
+    return { laneId: asset.id, lane, name, asset, type: lane.type, empty: asset.empty === true,
       source: asset.empty === true ? null : { node, nodeId: node.id, slot: 0, type: lane.type, name, assetId: asset.id } };
   }));
 }

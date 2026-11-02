@@ -12,6 +12,7 @@ from .nodes import (
     MemoryCleanup,
     MediaLoader,
     MediaBusItem,
+    BusToList,
     RemoteControl,
 )
 
@@ -29,6 +30,7 @@ class TerryXuExtension(ComfyExtension):
             MemoryCleanup,
             MediaLoader,
             MediaBusItem,
+            BusToList,
             BoolSwitch,
             BooleanSwitch,
             RemoteControl,

@@ -111,3 +111,34 @@ class MediaBusItem(io.ComfyNode):
         else:
             value = InputImpl.VideoFromFile(asset["full_path"])
         return io.NodeOutput(value)
+
+
+class BusToList(io.ComfyNode):
+    """Collect resolved bus lanes into ComfyUI's native execution list."""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="TerryXuBusToList", display_name="总线转列表", category="TerryXu/线束整理",
+            description="按总线顺序输出一个列表；节点显示识别到的类型。混合列表需要下游支持对应类型。",
+            search_aliases=["bus to list", "总线转列表"],
+            inputs=[
+                MediaBus.Input("bus", display_name="总线", optional=True),
+                io.Autogrow.Input("items", template=io.Autogrow.TemplatePrefix(
+                    input=io.AnyType.Input("item", optional=True), prefix="item_", min=0, max=100,
+                ), optional=True),
+            ],
+            outputs=[io.AnyType.Output(display_name="列表", is_output_list=True)],
+        )
+
+    @classmethod
+    def execute(cls, bus=None, items=None):
+        if items:
+            values = [value for _, value in sorted(items.items(), key=lambda item: int(item[0].rsplit("_", 1)[-1]))]
+        elif bus is not None:
+            # Also support direct API use with a real media-loader bus.
+            values = [MediaBusItem.execute(bus, asset["id"]).result[0]
+                      for asset in bus if not asset.get("empty")]
+        else:
+            values = []
+        return io.NodeOutput(values if values else ExecutionBlocker(None))

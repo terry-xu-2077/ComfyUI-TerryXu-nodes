@@ -73,6 +73,29 @@ class MediaLoaderTests(unittest.TestCase):
         self.groups["image"].reverse()
         self.assertNotEqual(first, media.MediaLoader.fingerprint_inputs(json.dumps(self.groups)))
 
+    def test_bus_list_is_native_list_with_mixed_values_and_numeric_order(self):
+        media.BusToList.VALIDATE_CLASS()
+        self.assertEqual(list(media.BusToList.OUTPUT_IS_LIST), [True])
+        image, audio, video = object(), {"waveform": object()}, object()
+        values = media.BusToList.execute(items={"item_10": video, "item_2": audio, "item_0": image}).result[0]
+        self.assertIs(values[0], image)
+        self.assertIs(values[1], audio)
+        self.assertIs(values[2], video)
+        empty = media.BusToList.execute().result[0]
+        self.assertIsInstance(empty, media.ExecutionBlocker)
+        self.assertIsNone(empty.message)
+
+    def test_media_bus_to_list_decodes_in_order_and_skips_empty_slots(self):
+        self.groups["image"].reverse()
+        self.groups["image"].append({"id": "empty", "empty": True})
+        bus = media.MediaLoader.execute(json.dumps(self.groups)).result[0]
+        values = media.BusToList.execute(bus=bus).result[0]
+        self.assertEqual(len(values), 4)
+        self.assertEqual(float(values[0][0, 0, 0, 2]), 1.0)
+        self.assertEqual(float(values[1][0, 0, 0, 0]), 1.0)
+        self.assertEqual(values[2]["sample_rate"], 16000)
+        self.assertEqual(values[3].get_dimensions(), (16, 16))
+
     def test_rejects_cross_type_missing_files_and_traversal(self):
         for path in ("sound.wav", "missing.png", "../outside.png"):
             self.groups["image"][0]["path"] = path

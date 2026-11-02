@@ -6,6 +6,7 @@ const UNPACK_TYPE = "TerryXuWireBusUnpack";
 const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
 const WIRELESS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
 const MEDIA_LOADER_TYPE = "TerryXuMediaLoader";
+const LIST_TYPE = "TerryXuBusToList";
 const GET_TYPE = "GetNode";
 const SET_TYPE = "SetNode";
 const VUE_STYLE_ID = "terry-wire-bus-vue-port-style";
@@ -470,7 +471,7 @@ function vueBusNodes() {
   for (const graph of workflowBusGraphs()) {
     for (const node of graph?._nodes || graph?.nodes || []) {
       const type = nodeType(node);
-      if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE, MEDIA_LOADER_TYPE].includes(type)) continue;
+      if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE, MEDIA_LOADER_TYPE, LIST_TYPE].includes(type)) continue;
       const id = node?.id == null ? node : String(node.id);
       if (seenIds.has(id)) continue;
       seenIds.add(id);
@@ -514,6 +515,10 @@ function refreshVuePortStyle() {
     const expandedRoot = `${root}:not([data-collapsed])`;
     if (type === MEDIA_LOADER_TYPE) {
       busOutputs.push(`${expandedRoot} .lg-slot--output [data-testid="slot-connection-dot"]`);
+      continue;
+    }
+    if (type === LIST_TYPE) {
+      unpacks.push(`${expandedRoot} .lg-slot--input [data-testid="slot-connection-dot"]`);
       continue;
     }
     if (type === PACK_TYPE || type === WIRELESS_PACK_TYPE) {
@@ -790,17 +795,17 @@ function queueVueStyleRefresh() {
 function patchBusNode(node) {
   if (!node) return;
   const type = nodeType(node);
-  if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE, MEDIA_LOADER_TYPE].includes(type)) return;
+  if (![PACK_TYPE, UNPACK_TYPE, WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE, MEDIA_LOADER_TYPE, LIST_TYPE].includes(type)) return;
   queueVueStyleRefresh();
   if (node.__terryBusCapsulePatched) return;
   node.__terryBusCapsulePatched = true;
   node.__terryBusRefreshVisual = queueVueStyleRefresh;
 
-  if (type === MEDIA_LOADER_TYPE) {
+  if (type === MEDIA_LOADER_TYPE || type === LIST_TYPE) {
     const foreground = node.onDrawForeground;
     node.onDrawForeground = function (ctx) {
       const result = foreground?.apply(this, arguments);
-      if (!isNodeCollapsed(this)) drawCapsulePort(ctx, this, true, 0);
+      if (!isNodeCollapsed(this)) drawCapsulePort(ctx, this, type === MEDIA_LOADER_TYPE, 0);
       return result;
     };
     return;

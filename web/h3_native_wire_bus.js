@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { mediaExecutionSource } from "./media_loader_model.mjs";
 import {
   H3_BUS_TYPE,
   h3AllGraphs,
@@ -32,6 +33,7 @@ function cloneLink(link) {
     source_slot: Number(link?.source_slot) || 0,
     source_type: String(link?.source_type || "*"),
     kind: link?.kind || h3MediaKind(link?.source_type),
+    ...(link?.asset_id ? { asset_id: link.asset_id, asset: link.asset } : {}),
   };
 }
 
@@ -42,7 +44,7 @@ function uniqueLinks(links) {
     const id = Number(link?.source_id);
     const slot = Number(link?.source_slot) || 0;
     if (!Number.isFinite(id)) continue;
-    const key = `${id}:${slot}`;
+    const key = `${id}:${slot}:${link?.asset_id || ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(cloneLink(link));
@@ -241,14 +243,14 @@ function installReferenceView(node) {
   };
 
   const busKeys = () => new Set(
-    h3CollectBusMedia(node).map((item) => `${Number(item?.source_id)}:${Number(item?.source_slot) || 0}`)
+    h3CollectBusMedia(node).map((item) => `${Number(item?.source_id)}:${Number(item?.source_slot) || 0}:${item?.asset_id || ""}`)
   );
 
   const cleanDirect = () => {
     const bus = busKeys();
     const cleaned = uniqueLinks(state.direct).filter((link) => {
       if (String(link?.source_type || "").toUpperCase() === H3_BUS_TYPE) return false;
-      return !bus.has(`${Number(link?.source_id)}:${Number(link?.source_slot) || 0}`);
+      return !bus.has(`${Number(link?.source_id)}:${Number(link?.source_slot) || 0}:${link?.asset_id || ""}`);
     });
     state.direct = cleaned;
     return cleaned;
@@ -407,10 +409,14 @@ function patchGraphToPrompt() {
             for (const item of busMedia) {
               const sourceId = String(item?.source_execution_id || "");
               const sourceSlot = Number(item?.source_slot) || 0;
-              const key = `${sourceId}:${sourceSlot}`;
-              if (!sourceId || !output[sourceId] || seen.has(key)) continue;
+              if (!sourceId || !output[sourceId]) continue;
+              const value = item.asset_id
+                ? mediaExecutionSource(output, { assetId: item.asset_id }, sourceId)
+                : [sourceId, sourceSlot];
+              const key = `${value[0]}:${value[1]}`;
+              if (seen.has(key)) continue;
               seen.add(key);
-              assets.push([sourceId, sourceSlot]);
+              assets.push(value);
             }
 
             assets.forEach((value, index) => {

@@ -72,6 +72,9 @@ function previewFromSource(source, kind) {
 }
 
 function assetOptions(node) {
+  if (typeof node?.__terryH3MediaOptions === "function") {
+    return node.__terryH3MediaOptions();
+  }
   const links = Array.isArray(node?.properties?.[LINKS_PROP]) ? node.properties[LINKS_PROP] : [];
   const counts = { picture: 0, video: 0, audio: 0 };
   const out = [];
