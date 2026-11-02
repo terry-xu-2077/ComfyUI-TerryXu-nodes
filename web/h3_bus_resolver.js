@@ -1,5 +1,7 @@
 import { app } from "../../scripts/app.js";
 
+import { isTerrySwitch, selectedSwitchInput } from "./switch_bus_route.mjs";
+
 export const H3_BUS_TYPE = "TERRY_WIRE_BUS";
 export const H3_BUS_PACK_TYPE = "TerryXuWirelessBusPack";
 export const H3_WIRELESS_BUS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
@@ -210,6 +212,10 @@ export function h3ResolveUpstream(graph, linkId, seen = new Set()) {
   if (h3IsReroute(node)) {
     return h3ResolveUpstream(node.graph || graph, node.inputs?.[0]?.link, seen);
   }
+  if (isTerrySwitch(node)) {
+    const active = selectedSwitchInput(node);
+    return active?.link == null ? null : h3ResolveUpstream(node.graph || graph, active.link, seen);
+  }
   if (h3IsGetNode(node)) {
     const setter = h3FindSetter(node);
     if (setter?.inputs?.[0]?.link != null) {
@@ -307,6 +313,11 @@ export function h3IsBusLinkInfo(node, linkInfo) {
 
   if (h3IsSubgraphNode(originNode)) {
     const resolved = h3ResolveSubgraphOutput(originNode, originSlot, new Set());
+    if (resolved && (resolved.type === H3_BUS_TYPE || H3_BUS_PACK_TYPES.has(h3NodeType(resolved.node)))) return true;
+  }
+  if (isTerrySwitch(originNode)) {
+    const active = selectedSwitchInput(originNode);
+    const resolved = active?.link == null ? null : h3ResolveUpstream(originNode.graph || graph, active.link);
     if (resolved && (resolved.type === H3_BUS_TYPE || H3_BUS_PACK_TYPES.has(h3NodeType(resolved.node)))) return true;
   }
   if (h3IsReroute(originNode) && originNode.inputs?.[0]?.link != null) {
@@ -451,6 +462,11 @@ function h3ResolveUpstreamForExecution(graph, linkId, path, seen = new Set()) {
 
   if (h3IsReroute(node)) {
     return h3ResolveUpstreamForExecution(node.graph || graph, node.inputs?.[0]?.link, path, seen);
+  }
+  if (isTerrySwitch(node)) {
+    const active = selectedSwitchInput(node);
+    return active?.link == null ? null
+      : h3ResolveUpstreamForExecution(node.graph || graph, active.link, path, seen);
   }
   if (h3IsGetNode(node)) {
     const setter = h3FindSetter(node);
