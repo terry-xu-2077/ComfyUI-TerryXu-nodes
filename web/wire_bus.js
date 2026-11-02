@@ -837,10 +837,12 @@ function syncSwitchBusType(node) {
   const source = active?.link == null ? null : resolveUpstream(node.graph, active.link);
   const bus = source?.type === BUS_TYPE;
   if (bus && !node.__terrySwitchBusTypeOverridden) {
-    node.__terrySwitchBusOriginalType = output.type;
+    // A saved workflow can already contain our BUS socket; never cache BUS
+    // as the native output type when restoring the original switch.
+    node.__terrySwitchBusOriginalType = output.type === BUS_TYPE ? EMPTY_TYPE : output.type;
     node.__terrySwitchBusTypeOverridden = true;
   }
-  if (!bus && !node.__terrySwitchBusTypeOverridden) return false;
+  if (!bus && !node.__terrySwitchBusTypeOverridden && output.type !== BUS_TYPE) return false;
   const type = bus ? BUS_TYPE : (node.__terrySwitchBusOriginalType || EMPTY_TYPE);
   if (!bus) {
     delete node.__terrySwitchBusOriginalType;
@@ -848,7 +850,16 @@ function syncSwitchBusType(node) {
   }
   if (output.type === type) return false;
   output.type = type;
-  for (const linkId of output.links || []) syncConnectionType(node.graph, linkId, type);
+  for (const linkId of output.links || []) {
+    if (type !== EMPTY_TYPE) syncConnectionType(node.graph, linkId, type);
+    else {
+      const link = getLink(node.graph, linkId);
+      if (link) {
+        link.type = EMPTY_TYPE;
+        delete link.color;
+      }
+    }
+  }
   node.graph?.setDirtyCanvas?.(true, true);
   return true;
 }
