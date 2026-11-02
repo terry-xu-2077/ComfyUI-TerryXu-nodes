@@ -19,12 +19,57 @@ with patch.dict(sys.modules, {"server": types.SimpleNamespace(PromptServer=types
 
 
 class PerformanceTests(unittest.TestCase):
-    def test_smi_units_and_unsupported_fields(self):
-        devices = monitor.parse_smi('0, "NVIDIA GPU, Test", 41, 1024, 8192, 55\n1, Other GPU, [N/A], [N/A], [N/A], [N/A]\ninvalid\n')
-        self.assertEqual(devices[0]["memory_used"], 1024 ** 3)
-        self.assertEqual(devices[0]["temperature"], 55)
-        self.assertIsNone(devices[1]["usage"])
-        self.assertIsNone(devices[1]["memory_total"])
+    def test_gpu_stats_returns_empty_when_nvml_is_unavailable(self):
+        sampler = monitor.SystemSampler()
+        with patch.object(monitor, "nvml", None):
+            self.assertEqual(sampler.gpu_stats(), [])
+
+    def test_gpu_stats_reads_metrics_through_nvml(self):
+        class FakeNvml:
+            class NVMLError(Exception):
+                pass
+
+            NVML_TEMPERATURE_GPU = 0
+
+            @staticmethod
+            def nvmlInit():
+                return None
+
+            @staticmethod
+            def nvmlShutdown():
+                return None
+
+            @staticmethod
+            def nvmlDeviceGetCount():
+                return 1
+
+            @staticmethod
+            def nvmlDeviceGetHandleByIndex(index):
+                return index
+
+            @staticmethod
+            def nvmlDeviceGetName(handle):
+                return b"Test GPU"
+
+            @staticmethod
+            def nvmlDeviceGetMemoryInfo(handle):
+                return types.SimpleNamespace(used=1024, total=2048)
+
+            @staticmethod
+            def nvmlDeviceGetUtilizationRates(handle):
+                return types.SimpleNamespace(gpu=75)
+
+            @staticmethod
+            def nvmlDeviceGetTemperature(handle, sensor):
+                return 65
+
+        sampler = monitor.SystemSampler()
+        with patch.object(monitor, "nvml", FakeNvml), patch.object(monitor.atexit, "register"):
+            devices = sampler.gpu_stats()
+        self.assertEqual(devices, [{
+            "index": "0", "name": "Test GPU", "usage": 75,
+            "memory_used": 1024, "memory_total": 2048, "temperature": 65,
+        }])
 
     def test_shared_cache_and_available_ram(self):
         sampler = monitor.SystemSampler()
