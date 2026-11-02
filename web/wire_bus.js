@@ -1402,7 +1402,7 @@ export function syncMediaBusOutputs(pack) {
 // Protect only actual downstream consumers of a particular expanded media output.
 function isPassiveMediaReference(node) {
   const type = nodeType(node);
-  return H3_TYPES.has(type) || type === LIST_TYPE || isUnpack(node) || isWirelessPack(node);
+  return H3_TYPES.has(type) || type === LIST_TYPE || isUnpack(node) || isWirelessPack(node) || isTerrySwitch(node);
 }
 
 function hasProtectedMediaConsumer(node, outputIndex) {
@@ -2000,7 +2000,10 @@ app.registerExtension({
           type === BUS_TYPE
           || isPack(originNode)
           || isReroute(originNode)
-          || isTerrySwitch(originNode)
+          || (isTerrySwitch(originNode) && (() => {
+            const active = selectedSwitchInput(originNode);
+            return active?.link != null && resolveUpstream(originNode.graph || this.graph, active.link)?.type === BUS_TYPE;
+          })())
           || isGet(originNode)
         );
       };
