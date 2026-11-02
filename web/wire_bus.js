@@ -1645,11 +1645,11 @@ function omitBlockedOptionalReferences(graph, prompt, emptySources) {
 function patchGraphToPrompt() {
   if (app.__terryWireBusPatched) return;
   app.__terryWireBusPatched = true;
-  const original = app.graphToPrompt?.bind(app);
-  if (!original) return;
+  const original = app.graphToPrompt;
+  if (typeof original !== "function") return;
 
   app.graphToPrompt = async function (...args) {
-    const result = await original(...args);
+    const result = await Reflect.apply(original, this, args);
     try {
       const prompt = result?.output;
       if (!prompt) return result;
