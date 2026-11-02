@@ -122,6 +122,8 @@ function install(node) {
     node.properties[COLLAPSED_PROPERTY] ||= {};
     node.properties[COLLAPSED_PROPERTY][kind] = collapsed;
     section.classList.toggle("is-collapsed", collapsed);
+    const addButton = section.querySelector(".terry-media-add");
+    if (addButton) addButton.hidden = collapsed;
     toggle.setAttribute("aria-expanded", String(!collapsed));
     toggle.ariaLabel = collapsed ? "展开" + MEDIA_LABELS[kind] + "区域" : "收起" + MEDIA_LABELS[kind] + "区域";
     toggle.title = toggle.ariaLabel;
@@ -261,8 +263,12 @@ function install(node) {
       const plus = button("添加" + MEDIA_LABELS[kind] + "空槽位", "terry-media-add", () => {
         const next = groups(); next[kind].push(emptyMediaSlot(kind, crypto.randomUUID()));
         report(""); update(next);
-      }); plus.textContent = "+";
+      }); plus.textContent = "+"; plus.hidden = collapsed;
       sectionHead.append(heading, plus);
+      sectionHead.addEventListener("click", event => {
+        if (event.target.closest?.("button")) return;
+        setCollapsed(kind, !isCollapsed(kind), section, toggle);
+      });
       grid.append(...next[kind].map((asset, index) => card(asset, kind, index)));
       grid.addEventListener("dragover", event => { if (dragging?.kind === kind) event.preventDefault(); });
       grid.addEventListener("drop", event => {
