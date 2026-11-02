@@ -5,6 +5,7 @@ import { MEDIA_KINDS, MEDIA_LABELS, readMedia, mediaFile, moveMedia, emptyMediaS
 
 const NODE_ID = "TerryXuMediaLoader";
 const COLLAPSED_PROPERTY = "terry_media_collapsed";
+const EXPANDED_HEIGHT_PROPERTY = "terry_media_expanded_height";
 let sectionId = 0;
 let directorModule;
 
@@ -76,7 +77,7 @@ function install(node) {
   Object.assign(storage.options, { hidden: true, canvasOnly: true });
   storage.computeSize = () => [0, -4];
   if (storage.element) storage.element.hidden = true;
-  let picker, disposed = false, dragging = null, renderedValue, expandedHeight = null;
+  let picker, disposed = false, dragging = null, renderedValue;
   const root = document.createElement("div"); root.className = "terry-media-loader";
   const error = document.createElement("div"); error.className = "terry-media-error"; error.role = "status"; error.hidden = true;
   const sections = document.createElement("div"); sections.className = "terry-media-sections";
@@ -97,13 +98,19 @@ function install(node) {
   }
   function resizeForCollapse() {
     if (!anyCollapsed()) {
-      if (expandedHeight != null) {
-        node.setSize?.([Number(node.size?.[0]) || 640, expandedHeight]);
-        expandedHeight = null;
+      const height = Number(node.properties?.[EXPANDED_HEIGHT_PROPERTY]);
+      if (Number.isFinite(height) && height > 0) {
+        node.setSize?.([Number(node.size?.[0]) || 640, height]);
       }
+      if (node.properties) delete node.properties[EXPANDED_HEIGHT_PROPERTY];
       return;
     }
-    if (expandedHeight == null) expandedHeight = Math.max(240, Number(node.size?.[1]) || 800);
+    node.properties ||= {};
+    let expandedHeight = Number(node.properties[EXPANDED_HEIGHT_PROPERTY]);
+    if (!Number.isFinite(expandedHeight) || expandedHeight < 220) {
+      expandedHeight = Math.max(240, Number(node.size?.[1]) || 800);
+      node.properties[EXPANDED_HEIGHT_PROPERTY] = expandedHeight;
+    }
     const target = Math.max(220, Math.min(expandedHeight, Math.ceil(contentHeight() + 72)));
     if (Math.abs((Number(node.size?.[1]) || 0) - target) > 1) {
       node.setSize?.([Number(node.size?.[0]) || 640, target]);
