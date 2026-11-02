@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 
-const BOOL_SOURCE_TYPE = "TerryXuBooleanSwitch";
+const BOOL_SOURCE_TYPE = "TerryXuLinkedBoolean";
 const TWO_WAY_TYPE = "TerryXuBoolSwitch";
 const BOOL_PROPERTY = "terry_bool_switch_state";
 

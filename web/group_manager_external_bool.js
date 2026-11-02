@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 
 const MANAGER_TYPE = "TerryXuGroupManager";
-const BOOLEAN_SOURCE_TYPE = "TerryXuBooleanSwitch";
+const BOOLEAN_SOURCE_TYPE = "TerryXuLinkedBoolean";
 const STATE_PROPERTY = "terry_group_manager_groups";
 const POLL_MS = 180;
 const ROW_HEIGHT = 28;

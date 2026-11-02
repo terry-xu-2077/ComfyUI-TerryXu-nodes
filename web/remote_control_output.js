@@ -3,7 +3,6 @@ import { app } from "../../scripts/app.js";
 const REMOTE_TYPE = "TerryXuRemoteControl";
 const LINE_TYPE = "TerryXuLineSwitch";
 const BOOL_TYPE = "TerryXuBoolSwitch";
-const BOOLEAN_TYPE = "TerryXuBooleanSwitch";
 const CHANNEL_PROPERTY = "terry_control_channel";
 const REMOTE_CHANNEL_PROPERTY = "terry_remote_channel";
 const REMOTE_VALUE_PROPERTY = "terry_remote_value";
@@ -81,14 +80,14 @@ function targetForRemote(remote) {
   if (!channel) return null;
   return nodes().find((node) => {
     const type = nodeType(node);
-    return [LINE_TYPE, BOOL_TYPE, BOOLEAN_TYPE].includes(type) && targetChannel(node) === channel;
+    return [LINE_TYPE, BOOL_TYPE].includes(type) && targetChannel(node) === channel;
   }) || null;
 }
 
 function remoteKind(target) {
   const type = nodeType(target);
   if (type === LINE_TYPE) return "int";
-  if (type === BOOL_TYPE || type === BOOLEAN_TYPE) return "bool";
+  if (type === BOOL_TYPE) return "bool";
   return null;
 }
 
@@ -104,21 +103,6 @@ function remoteValue(remote, target, kind) {
     return Boolean(source);
   }
   return null;
-}
-
-function forceExecutable(node) {
-  if (!isRemote(node) || node.__terryRemoteExecutableLocked) return;
-  try {
-    Object.defineProperty(node, "isVirtualNode", {
-      configurable: true,
-      enumerable: true,
-      get: () => false,
-      set: () => {},
-    });
-  } catch {
-    node.isVirtualNode = false;
-  }
-  node.__terryRemoteExecutableLocked = true;
 }
 
 function hidePayloadWidget(node) {
@@ -157,7 +141,6 @@ function setPayload(node, payload) {
 
 function syncRemoteOutput(node) {
   if (!isRemote(node)) return;
-  forceExecutable(node);
   const target = targetForRemote(node);
   const kind = remoteKind(target);
   const hadOutput = Boolean(node.outputs?.length);
@@ -269,9 +252,7 @@ app.registerExtension({
   name: "TerryXu.RemoteControlOutput",
 
   addCustomNodeDefs(defs) {
-    // line_switch.js historically registered this as a frontend-only virtual
-    // node. Replace that definition with the executable shape that mirrors the
-    // bundled Python node.
+    // The sole frontend definition mirrors the executable Python node.
     defs[REMOTE_TYPE] = executableRemoteDef();
   },
 
