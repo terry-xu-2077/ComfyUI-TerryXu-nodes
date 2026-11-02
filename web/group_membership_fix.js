@@ -2,8 +2,6 @@ import { app } from "../../scripts/app.js";
 
 const TOP_EDGE_GROUP_TYPES = new Set([
   "TerryXuGroupManager",
-  "TerryXuWireBusPack",
-  "TerryXuWireBusUnpack",
   "TerryXuWirelessBusPack",
   "TerryXuWirelessBusUnpack",
 ]);

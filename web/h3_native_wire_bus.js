@@ -17,13 +17,10 @@ import {
 
 const TARGETS = {
   TerryXuH3PromptEditor: "terry_h3_virtual_media_links",
-  TerryXuH3ShotTimeline: "terry_h3_timeline_virtual_media_links",
 };
 
 const BUS_SOURCE_TYPES = new Set([
-  "TerryXuWireBusPack",
   "TerryXuWirelessBusPack",
-  "TerryXuWireBusUnpack",
   "TerryXuWirelessBusUnpack",
 ]);
 
@@ -55,7 +52,6 @@ function uniqueLinks(links) {
 function refreshNode(node) {
   node.__terryH3?.connectionChanged?.();
   node.__terryH3Editor?.refresh?.();
-  node.__terryH3ShotTimeline?.refreshAssets?.();
   node.setDirtyCanvas?.(true, true);
   node.graph?.setDirtyCanvas?.(true, true);
 }
@@ -199,7 +195,7 @@ function installTypeGuard(nodeType, nodeData) {
     proto.onConnectionsChange = wrappedConnections;
   }
 
-  // H3's legacy editor serializes node.properties[virtual_links]. The native
+  // The H3 editor serializes node.properties[virtual_links]. The native
   // BUS view intentionally exposes expanded BUS media through that property for
   // preview/execution, but those derived entries must NEVER be written into the
   // workflow. Persist only real direct virtual references.

@@ -3,7 +3,6 @@ import { app } from "../../scripts/app.js";
 const BUS_TYPE = "TERRY_WIRE_BUS";
 const TARGETS = {
   TerryXuH3PromptEditor: "terry_h3_virtual_media_links",
-  TerryXuH3ShotTimeline: "terry_h3_timeline_virtual_media_links",
 };
 
 function nodeType(node) {
@@ -47,7 +46,6 @@ function rawDirectLinks(node) {
 function refreshNode(node) {
   node.__terryH3?.connectionChanged?.();
   node.__terryH3Editor?.refresh?.();
-  node.__terryH3ShotTimeline?.refreshAssets?.();
   node.setDirtyCanvas?.(true, true);
   node.graph?.setDirtyCanvas?.(true, true);
 }

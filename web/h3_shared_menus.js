@@ -3,7 +3,6 @@ import { api } from "../../scripts/api.js";
 import { createH3TokenNode, H3_CAMERA_COMMANDS } from "./h3_rich_text.js";
 
 const PROMPT_LINKS = "terry_h3_virtual_media_links";
-const TIMELINE_LINKS = "terry_h3_timeline_virtual_media_links";
 const BINDINGS_PROP = "terry_h3_subject_bindings";
 const FILTER_PROP = "terry_h3_asset_menu_filter";
 const CARET = "\u200B";
@@ -20,10 +19,9 @@ const CAMERA_META = { id: "camera", label: "镜头运动", icon: "◉", detail: 
 const controllers = new WeakMap();
 let styleInstalled = false;
 
-function linksProp(mode) { return mode === "timeline" ? TIMELINE_LINKS : PROMPT_LINKS; }
 function links(node, mode) {
   node.properties ||= {};
-  const value = node.properties[linksProp(mode)];
+  const value = node.properties[PROMPT_LINKS];
   return Array.isArray(value) ? value : [];
 }
 function graphNode(node, id) { return node?.graph?.getNodeById?.(Number(id)) || app.graph?.getNodeById?.(Number(id)) || null; }
