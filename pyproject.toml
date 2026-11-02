@@ -1,10 +1,22 @@
 [project]
 name = "comfyui-terryxu-nodes"
-version = "0.3.1"
-description = "TerryXu's personal ComfyUI tools."
+version = "1.0.0"
+description = "ComfyUI workflow utilities: H3 prompt editor, media loading, wiring, switches, file saving, and performance monitoring."
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "psutil>=5.9.0,<8",
+    "typing-extensions>=4.8.0",
+]
+classifiers = [
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Repository = "https://github.com/terry-xu-2077/ComfyUI-TerryXu-nodes"
+Documentation = "https://github.com/terry-xu-2077/ComfyUI-TerryXu-nodes#readme"
+"Bug Tracker" = "https://github.com/terry-xu-2077/ComfyUI-TerryXu-nodes/issues"
 
 [tool.comfy]
 PublisherId = "terryxu"
 DisplayName = "TerryXu"
-Icon = ""
