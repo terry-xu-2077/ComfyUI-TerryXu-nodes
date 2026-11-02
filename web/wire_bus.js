@@ -1361,18 +1361,33 @@ export function syncMediaBusOutputs(pack) {
   for (const unpack of connectedUnpacksForPack(pack)) syncUnpack(unpack, true);
 }
 
+// BUS receivers and H3 editors do not hold a specific media slot.
+// Protect only actual downstream consumers of a particular expanded media output.
+function isPassiveMediaReference(node) {
+  const type = nodeType(node);
+  return H3_TYPES.has(type) || type === LIST_TYPE || isUnpack(node) || isWirelessPack(node);
+}
+
+function hasProtectedMediaConsumer(node, outputIndex) {
+  return collectDownstreamTargets(node?.graph, node, outputIndex)
+    .some(target => !isPassiveMediaReference(target.node));
+}
+
 export function mediaAssetHasReferences(pack, assetId) {
   const lanes = effectivePackLaneEntries(pack).map(entry => entry.lane);
   for (const unpack of connectedUnpacksForPack(pack)) {
     if (!unpackExpanded(unpack)) {
-      if (unpack.outputs?.some(output => output.links?.length)) return true;
+      if (hasProtectedMediaConsumer(unpack, 0)) return true;
       continue;
     }
     ensureUnpackLaneIds(unpack, lanes);
-    if (unpack.outputs?.some(output => output[LANE_FIELD] === assetId && output.links?.length)) return true;
+    for (let index = 0; index < (unpack.outputs?.length || 0); index++) {
+      if (unpack.outputs[index]?.[LANE_FIELD] === assetId && hasProtectedMediaConsumer(unpack, index)) {
+        return true;
+      }
+    }
   }
-  // A bus consumer without expanded ports can reference any published asset.
-  return collectDownstreamTargets(pack.graph, pack, 0).some(target => !isUnpack(target.node));
+  return hasProtectedMediaConsumer(pack, 0);
 }
 
 function refreshPackSlots(pack) {
