@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE } from "../web/switch_bus_route.mjs";
 import { mediaLanes, mediaExecutionSource } from "../web/media_loader_model.mjs";
 
 const BUS = "TERRY_WIRE_BUS";
@@ -9,7 +10,7 @@ const BUS = "TERRY_WIRE_BUS";
 test("connected bus cable endpoints align with centered capsules, while individual lanes retain their spacing", async () => {
   const source = (await readFile(new URL("../web/wire_bus_visual.js", import.meta.url), "utf8"))
     .replace(/^import .*;\r?\n/gm, "");
-  const context = vm.createContext({ app: { registerExtension() {} }, requestAnimationFrame() {},
+  const context = vm.createContext({ isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE, app: { registerExtension() {} }, requestAnimationFrame() {},
     LiteGraph: { NODE_TITLE_HEIGHT: 30, NODE_SLOT_HEIGHT: 20 } });
   vm.runInContext(source + "\nglobalThis.patchBusNode = patchBusNode;", context);
   for (const type of ["TerryXuWirelessBusPack"]) {

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE } from "../web/switch_bus_route.mjs";
 import { readMedia, moveMedia, removeMedia, mediaFile, mediaLanes, mediaExecutionSource } from "../web/media_loader_model.mjs";
 
 const asset = (id, kind = "image") => ({ id, kind, path: `${id}.png`, source: "input", name: `${id}.png` });
@@ -45,7 +46,7 @@ test(`${unpackType}${bridgeType ? ` through ${bridgeType}` : ""} sorting keeps p
   } }) };
   const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
     .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
-  const context = vm.createContext({ app, mediaExecutionSource, console, navigator: { language: "zh-CN" } });
+  const context = vm.createContext({ isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE, app, mediaExecutionSource, console, navigator: { language: "zh-CN" } });
   vm.runInContext(source + "\nglobalThis.busTest = {syncUnpack,patchGraphToPrompt,mediaAssetHasReferences};", context);
   const pack = { id: 1, type: "TerryXuMediaLoader", graph, size: [640, 740], outputs: [{ type: "TERRY_WIRE_BUS" }] };
   let groups = { image: [asset("a"), asset("b")], audio: [], video: [] };

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE } from "../web/switch_bus_route.mjs";
 
 async function fixture() {
   const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
@@ -11,7 +12,7 @@ async function fixture() {
     getNodeById(id) { return this._nodes.find(node => String(node.id) === String(id)); },
   };
   const app = { graph, registerExtension() {} };
-  const context = vm.createContext({
+  const context = vm.createContext({ isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE,
     app, navigator: { language: "zh-CN" }, mediaExecutionSource: () => null,
   });
   vm.runInContext(source + "\nglobalThis.references = mediaAssetHasReferences;", context);

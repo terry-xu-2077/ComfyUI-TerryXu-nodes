@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE } from "../web/switch_bus_route.mjs";
 import { mediaLanes, mediaExecutionSource } from "../web/media_loader_model.mjs";
 
 async function moduleContext(file, globals, exports) {
@@ -30,7 +31,7 @@ async function fixture(nested = false) {
     [`${prefix}1`]: { class_type: "TerryXuMediaLoader", inputs: {} },
     [`${prefix}2`]: { class_type: "TerryXuH3PromptEditor", inputs: { prompt: "<Picture 1> <Picture 2> <Audio 1> <Video 1>" } },
   } }) };
-  const resolver = await moduleContext("h3_bus_resolver.js", { app }, ["H3_BUS_TYPE", "h3AllGraphs", "h3BusSignature", "h3CollectBusMedia",
+  const resolver = await moduleContext("h3_bus_resolver.js", { app, isTerrySwitch, selectedSwitchInput }, ["H3_BUS_TYPE", "h3AllGraphs", "h3BusSignature", "h3CollectBusMedia",
     "h3CollectBusMediaForExecution", "h3IsBusLinkInfo", "h3IsSubgraphInputLinkInfo", "h3IsSubgraphNode", "h3MediaInputIndex", "h3MediaKind", "h3NodeType", "h3ResolveNativeBus"]);
   const native = await moduleContext("h3_native_wire_bus.js", { app, ...resolver, mediaExecutionSource }, ["installReferenceView", "patchGraphToPrompt"]);
   native.installReferenceView(editor);

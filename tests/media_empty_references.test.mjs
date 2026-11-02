@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE } from "../web/switch_bus_route.mjs";
 import { mediaLanes, mediaExecutionSource } from "../web/media_loader_model.mjs";
 
 async function fixture() {
@@ -11,7 +12,7 @@ async function fixture() {
   const app = { graph, registerExtension() {}, graphToPrompt: async () => ({ output: structuredClone(prompt) }) };
   const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
     .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
-  const context = vm.createContext({ app, mediaExecutionSource, console, navigator: { language: "zh-CN" } });
+  const context = vm.createContext({ isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE, app, mediaExecutionSource, console, navigator: { language: "zh-CN" } });
   vm.runInContext(source + "\nglobalThis.emptyTest = {syncUnpack,patchGraphToPrompt};", context);
   const groups = { image: [{ id: "a" }, { id: "b" }, ...Array.from({ length: 7 }, (_, i) => ({ id: `i${i}`, empty: true }))],
     audio: Array.from({ length: 3 }, (_, i) => ({ id: `s${i}`, empty: true })),
