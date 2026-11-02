@@ -140,3 +140,25 @@ test("switches can be chained without exposing a phantom BUS", async () => {
   assert.equal(api.findPackFromUnpack(unpack), null);
   assert.notEqual(next.outputs[0].type, BUS);
 });
+
+test("restoring a saved BUS socket clears a stale type when no BUS is selected", async () => {
+  const { selector, graph, api } = await fixture(BOOL_SWITCH_TYPE);
+  assert.equal(selector.outputs[0].type, BUS);
+  selector.inputs[1].link = null;
+  delete selector.__terrySwitchBusTypeOverridden;
+  delete selector.__terrySwitchBusOriginalType;
+  api.syncSwitchBusType(selector);
+  assert.equal(selector.outputs[0].type, "*");
+  assert.equal(graph.links[12].type, "*");
+});
+
+test("an externally controlled switch follows its latest active input", async () => {
+  const { selector, first, second, unpack, api } = await fixture(BOOL_SWITCH_TYPE);
+  selector.inputs[0].link = 55;
+  selector.__terryRuntimeBool = true;
+  api.syncSwitchBusType(selector);
+  assert.equal(api.findPackFromUnpack(unpack), second);
+  selector.__terryRuntimeBool = false;
+  api.syncSwitchBusType(selector);
+  assert.equal(api.findPackFromUnpack(unpack), first);
+});
