@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - .github/workflows/registry-diagnostic.yml
+      - web/wire_bus.js
+      - pyproject.toml
 
 permissions:
   contents: read
@@ -57,7 +59,7 @@ jobs:
           for url in \
             "https://api.comfy.org/nodes/comfyui-terryxu-nodes" \
             "https://api.comfy.org/nodes/comfyui-terryxu-nodes/versions?include_status_reason=true" \
-            "https://api.comfy.org/nodes/comfyui-terryxu-nodes/install?version=1.0.1"
+            "https://api.comfy.org/nodes/comfyui-terryxu-nodes/install?version=1.0.2"
           do
             echo
             echo "===== $url ====="
