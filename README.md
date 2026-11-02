@@ -4,6 +4,12 @@
 
 项目目标是把常用但原生 ComfyUI 不够顺手的操作做成更直观、更高效的节点，并尽量同时兼容普通节点模式与 Nodes 2.0。
 
+## 通过 ComfyUI Manager 安装
+
+正式发布到 Comfy Registry 后，在 ComfyUI Manager 中搜索 `TerryXu` 或 `comfyui-terryxu-nodes`，选择 **TerryXu** 安装或更新，然后重启 ComfyUI。
+
+首次上架和版本更新由仓库的 GitHub Actions 发布工作流处理；发布前需要在 [Comfy Registry](https://registry.comfy.org/) 创建或确认发布者 `terryxu`，并将该发布者的 API 密钥保存到 GitHub Actions 仓库密钥 `REGISTRY_ACCESS_TOKEN`。首次可在 GitHub Actions 页面手动运行 **Publish to Comfy registry**。此后更新 `pyproject.toml` 中的版本号并推送到 `main`，即可自动发布新版本。
+
 ## 安装
 
 将仓库克隆或下载到：
@@ -315,3 +321,7 @@ H3 提示词编辑器的时间轴版本，适合处理多镜头视频提示词�
 ## 说明
 
 TerryXu 会继续围绕实际 ComfyUI 制作流程增加实用功能，但 README 只维护当前项目介绍、节点作用和使用方法，不再记录逐版本更新日志。
+
+## 开源许可
+
+本项目以 [MIT License](LICENSE) 发布。
