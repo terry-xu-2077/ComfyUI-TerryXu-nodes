@@ -1,0 +1,31 @@
+name: Temporary Comfy Registry diagnostic
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/registry-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-registry:
+    if: ${{ github.repository == 'terry-xu-2077/ComfyUI-TerryXu-nodes' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query public Registry records
+        shell: bash
+        run: |
+          set +e
+          for url in \
+            "https://api.comfy.org/nodes/comfyui-terryxu-nodes" \
+            "https://api.comfy.org/nodes/comfyui-terryxu-nodes/versions?include_status_reason=true" \
+            "https://api.comfy.org/nodes/comfyui-terryxu-nodes/install?version=1.0.0"
+          do
+            echo
+            echo "===== $url ====="
+            curl --silent --show-error --location --max-time 30 \
+              --write-out "\\nHTTP_STATUS:%{http_code}\\n" "$url"
+          done
