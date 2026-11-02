@@ -1,0 +1,8 @@
+# Development and CI files are unnecessary in installed node packages.
+.github/
+tests/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.vscode/
+.idea/
