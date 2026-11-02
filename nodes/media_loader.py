@@ -57,7 +57,7 @@ class MediaLoader(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="TerryXuMediaLoader", display_name="媒体加载器", category="TerryXu/媒体",
+            node_id="TerryXuMediaLoader", display_name="📱 媒体加载器", category="TerryXu/媒体",
             description="分区添加图片、音频和视频，拖动卡片调整顺序；连接总线-出展开标准媒体出口。",
             search_aliases=["media loader", "加载媒体", "媒体加载器"],
             inputs=[io.String.Input("assets_json", default='{"image":[],"audio":[],"video":[]}',
@@ -119,7 +119,7 @@ class BusToList(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="TerryXuBusToList", display_name="总线转列表", category="TerryXu/线束整理",
+            node_id="TerryXuBusToList", display_name="📦 总线转列表", category="TerryXu/线束整理",
             description="按总线顺序输出一个列表；节点显示识别到的类型。混合列表需要下游支持对应类型。",
             search_aliases=["bus to list", "总线转列表"],
             inputs=[

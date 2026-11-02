@@ -41,7 +41,7 @@
     }
   },
   "TerryXuH3PromptEditor": {
-    "display_name": "Terry H3 编辑器",
+    "display_name": "📝 H3 提示词编辑",
     "description": "可视化编写 MiniMax H3 提示词；支持动态数量图片、视频、音频参考；@ 插入媒体，/ 打开 H3 语法菜单；输出始终为标准 H3 原文 STRING。",
     "inputs": {
       "prompt": {
@@ -97,7 +97,7 @@
     "description": "按频道联动线路切换器和布尔开关。"
   },
   "TerryXuMediaLoader": {
-    "display_name": "媒体加载器",
+    "display_name": "📱 媒体加载器",
     "description": "管理图片、音频及视频资产，输出有序总线。"
   },
   "TerryXuMediaBusItem": {
@@ -105,7 +105,7 @@
     "description": "媒体加载器使用的内部资产解码节点。"
   },
   "TerryXuBusToList": {
-    "display_name": "总线转列表",
+    "display_name": "📦 总线转列表",
     "description": "将媒体或无线总线转换为有序的 ComfyUI 列表。"
   }
 }

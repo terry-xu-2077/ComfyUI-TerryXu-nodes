@@ -14,8 +14,8 @@ import {
 const NODE_ID = "TerryXuH3PromptEditor";
 function migrateLegacyEditorTitle(node) {
   const title = String(node?.title || "");
-  if (["📃 H3提示词编辑器", "H3提示词编辑器"].includes(title)) node.title = "Terry H3 编辑器";
-  else if (["📃 H3 Prompt Editor", "H3 Prompt Editor"].includes(title)) node.title = "Terry H3 Editor";
+  if (["📃 H3提示词编辑器", "H3提示词编辑器", "Terry H3 编辑器"].includes(title)) node.title = "📝 H3 提示词编辑";
+  else if (["📃 H3 Prompt Editor", "H3 Prompt Editor", "Terry H3 Editor"].includes(title)) node.title = "📝 H3 Prompt Editor";
 }
 const LINKS_PROP = "terry_h3_virtual_media_links";
 const VIEW_PROP = "terry_h3_view_mode";

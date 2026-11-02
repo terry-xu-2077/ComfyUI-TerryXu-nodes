@@ -41,7 +41,7 @@
     }
   },
   "TerryXuH3PromptEditor": {
-    "display_name": "Terry H3 Editor",
+    "display_name": "📝 H3 Prompt Editor",
     "description": "Visual MiniMax H3 prompt editor with dynamic image, video and audio references. Use @ for media and / for H3 syntax commands; output is always standard H3 STRING text.",
     "inputs": {
       "prompt": {
@@ -97,7 +97,7 @@
     "description": "Control linked switches and routing via a selected channel."
   },
   "TerryXuMediaLoader": {
-    "display_name": "Media Loader",
+    "display_name": "📱 Media Loader",
     "description": "Manage image, audio and video assets and expose an ordered bus."
   },
   "TerryXuMediaBusItem": {
@@ -105,7 +105,7 @@
     "description": "Internal asset decoder for Media Loader."
   },
   "TerryXuBusToList": {
-    "display_name": "Bus to List",
+    "display_name": "📦 Bus to List",
     "description": "Expand a media or wireless bus to an ordered ComfyUI list."
   }
 }
