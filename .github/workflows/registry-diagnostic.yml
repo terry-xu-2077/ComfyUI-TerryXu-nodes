@@ -15,6 +15,29 @@ jobs:
     if: ${{ github.repository == 'terry-xu-2077/ComfyUI-TerryXu-nodes' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Check Manager node-list visibility
+        shell: bash
+        run: |
+          python - <<'PY'
+          import requests
+          base = "https://api.comfy.org/nodes"
+          target = "comfyui-terryxu-nodes"
+          cases = [
+              ("unfiltered", {}),
+              ("manager-windows", {"page": 1, "limit": 30, "comfyui_version": "unknown", "form_factor": "git-windows"}),
+              ("manager-linux", {"page": 1, "limit": 30, "comfyui_version": "unknown", "form_factor": "git-linux"}),
+          ]
+          for label, params in cases:
+              try:
+                  response = requests.get(base, params=params, timeout=30)
+                  print(f"\\n===== {label}: HTTP {response.status_code} {response.url} =====")
+                  data = response.json()
+                  print("totalPages:", data.get("totalPages"), "total:", data.get("total"))
+                  found = [node for node in data.get("nodes", []) if node.get("id") == target]
+                  print("target_matches:", found)
+              except Exception as exc:
+                  print(label, "ERROR:", repr(exc))
+          PY
       - name: Query public Registry records
         shell: bash
         run: |
