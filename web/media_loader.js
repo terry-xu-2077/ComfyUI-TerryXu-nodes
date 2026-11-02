@@ -4,6 +4,8 @@ import { syncMediaBusOutputs, mediaAssetHasReferences } from "./wire_bus.js";
 import { MEDIA_KINDS, MEDIA_LABELS, readMedia, mediaFile, moveMedia, emptyMediaSlot, removeMedia, mediaLanes } from "./media_loader_model.mjs";
 
 const NODE_ID = "TerryXuMediaLoader";
+const COLLAPSED_PROPERTY = "terry_media_collapsed";
+let sectionId = 0;
 let directorModule;
 
 function installStyle() {
@@ -74,12 +76,53 @@ function install(node) {
   Object.assign(storage.options, { hidden: true, canvasOnly: true });
   storage.computeSize = () => [0, -4];
   if (storage.element) storage.element.hidden = true;
-  let picker, disposed = false, dragging = null, renderedValue;
+  let picker, disposed = false, dragging = null, renderedValue, expandedHeight = null;
   const root = document.createElement("div"); root.className = "terry-media-loader";
   const error = document.createElement("div"); error.className = "terry-media-error"; error.role = "status"; error.hidden = true;
   const sections = document.createElement("div"); sections.className = "terry-media-sections";
   root.append(sections, error);
   const groups = () => readMedia(storage.value);
+  const isCollapsed = kind => node.properties?.[COLLAPSED_PROPERTY]?.[kind] === true;
+  const anyCollapsed = () => MEDIA_KINDS.some(isCollapsed);
+  function contentHeight() {
+    if (sections.scrollHeight > 0) return sections.scrollHeight + 24;
+    const width = Math.max(320, Number(node.size?.[0]) || 640);
+    const cols = Math.max(1, Math.floor((width - 52 + 12) / 172));
+    const data = groups();
+    return 24 + (MEDIA_KINDS.length - 1) * 8 + MEDIA_KINDS.reduce((height, kind) => {
+      if (isCollapsed(kind) || !data[kind].length) return height + 46;
+      const rows = Math.ceil(data[kind].length / cols);
+      return height + 54 + rows * 178 + (rows - 1) * 12;
+    }, 0);
+  }
+  function resizeForCollapse() {
+    if (!anyCollapsed()) {
+      if (expandedHeight != null) {
+        node.setSize?.([Number(node.size?.[0]) || 640, expandedHeight]);
+        expandedHeight = null;
+      }
+      return;
+    }
+    if (expandedHeight == null) expandedHeight = Math.max(240, Number(node.size?.[1]) || 800);
+    const target = Math.max(220, Math.min(expandedHeight, Math.ceil(contentHeight() + 72)));
+    if (Math.abs((Number(node.size?.[1]) || 0) - target) > 1) {
+      node.setSize?.([Number(node.size?.[0]) || 640, target]);
+    }
+  }
+  function setCollapsed(kind, collapsed, section, toggle) {
+    node.graph?.beforeChange?.();
+    node.properties ||= {};
+    node.properties[COLLAPSED_PROPERTY] ||= {};
+    node.properties[COLLAPSED_PROPERTY][kind] = collapsed;
+    section.classList.toggle("is-collapsed", collapsed);
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    toggle.ariaLabel = collapsed ? "展开" + MEDIA_LABELS[kind] + "区域" : "收起" + MEDIA_LABELS[kind] + "区域";
+    toggle.title = toggle.ariaLabel;
+    resizeForCollapse();
+    node.graph?.afterChange?.();
+    node.graph?.change?.();
+    node.setDirtyCanvas?.(true, true);
+  }
   const report = message => { error.textContent = message; error.hidden = !message; };
   const update = next => {
     const tracker = app.extensionManager.workflow.activeWorkflow?.changeTracker;
@@ -194,9 +237,20 @@ function install(node) {
     for (const kind of MEDIA_KINDS) {
       const section = document.createElement("section"); section.className = "terry-media-section"; section.dataset.kind = kind;
       const sectionHead = document.createElement("header"); sectionHead.className = "terry-media-section-head";
-      const heading = document.createElement("h3"); heading.textContent = MEDIA_LABELS[kind];
-      const count = document.createElement("span"); count.textContent = String(next[kind].length); heading.append(count);
+      const heading = document.createElement("h3");
+      const toggle = button("", "terry-media-toggle", () => setCollapsed(kind, !isCollapsed(kind), section, toggle));
+      const chevron = document.createElement("span"); chevron.className = "terry-media-chevron"; chevron.textContent = "▾"; chevron.setAttribute("aria-hidden", "true");
+      const title = document.createElement("span"); title.textContent = MEDIA_LABELS[kind];
+      const count = document.createElement("span"); count.className = "terry-media-count"; count.textContent = String(next[kind].length);
+      toggle.append(chevron, title, count); heading.append(toggle);
       const grid = document.createElement("div"); grid.className = "terry-media-grid";
+      const collapsed = isCollapsed(kind);
+      section.classList.toggle("is-collapsed", collapsed);
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+      toggle.ariaLabel = (collapsed ? "展开" : "收起") + MEDIA_LABELS[kind] + "区域";
+      toggle.title = toggle.ariaLabel;
+      grid.id = "terry-media-grid-" + ++sectionId;
+      toggle.setAttribute("aria-controls", grid.id);
       const plus = button("添加" + MEDIA_LABELS[kind] + "空槽位", "terry-media-add", () => {
         const next = groups(); next[kind].push(emptyMediaSlot(kind, crypto.randomUUID()));
         report(""); update(next);
@@ -210,12 +264,13 @@ function install(node) {
       });
       section.append(sectionHead, grid); sections.append(section);
     }
+    if (anyCollapsed()) queueMicrotask(resizeForCollapse);
     return true;
   }
   root.addEventListener("pointerdown", event => event.stopPropagation());
   root.addEventListener("keydown", event => event.stopPropagation());
   const dom = node.addDOMWidget("media_cards", "terry_media_cards", root,
-    { serialize: false, hideOnZoom: false, getMinHeight: () => 700, getMaxHeight: () => 1400 });
+    { serialize: false, hideOnZoom: false, getMinHeight: () => Math.min(700, Math.max(120, contentHeight())), getMaxHeight: () => 1400 });
   dom.serialize = false;
   node.__terryBusLaneEntries = () => mediaLanes(node, groups());
   node.__terryMediaLoader = { render, dispose() { disposed = true; picker?.close(); root.querySelectorAll("video,audio").forEach(media => media.pause()); } };
