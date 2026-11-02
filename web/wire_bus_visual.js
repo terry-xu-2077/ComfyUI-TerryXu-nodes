@@ -493,10 +493,7 @@ function refreshVuePortStyle() {
   const busOutputs = [];
   const packRows = [];
   const unpackRows = [];
-  const packInputGroups = [];
-  const unpackOutputGroups = [];
   const nodeLayoutRules = [];
-  const phantomOutputRows = [];
   const wirelessInputGroups = [];
   const wirelessOutputGroups = [];
   const centeredWirelessBusGroups = [];
@@ -504,7 +501,6 @@ function refreshVuePortStyle() {
   const wirelessWidgetRows = [];
   const wirelessBadges = [];
   const collapsedWirelessChannelRules = [];
-  const wiredBadges = [];
 
   for (const node of vueBusNodes()) {
     if (node?.id == null) continue;
@@ -634,24 +630,6 @@ ${root}[data-collapsed]::before{
   style.textContent = nodeLayoutRules.length || selectors.length ? `
 ${nodeLayoutRules.join("\n")}
 ${collapsedWirelessChannelRules.join("\n")}
-${phantomOutputRows.length ? `${phantomOutputRows.join(",\n")}{
-  display:none !important;
-  pointer-events:none !important;
-}` : ""}
-${packInputGroups.length ? `${packInputGroups.join(",\n")}{
-  position:absolute !important;
-  left:0;
-  top:50% !important;
-  transform:translateY(-50%);
-  z-index:3;
-}` : ""}
-${unpackOutputGroups.length ? `${unpackOutputGroups.join(",\n")}{
-  position:absolute !important;
-  right:0;
-  top:50% !important;
-  transform:translateY(-50%);
-  z-index:4;
-}` : ""}
 ${wirelessInputGroups.length ? `${wirelessInputGroups.join(",\n")}{
   position:absolute !important;
   left:0;
@@ -705,23 +683,6 @@ ${wirelessWidgetRows.length ? `${wirelessWidgetRows.map((selector) => `${selecto
 }` : ""}
 ${wirelessBadges.length ? `${wirelessBadges.join(",\n")}{
   display:none !important;
-}` : ""}
-${wiredBadges.length ? `${wiredBadges.join(",\n")}{
-  height:17px !important;
-  min-height:17px !important;
-  max-width:calc(100% - 10px);
-  padding:0 5px !important;
-  overflow:hidden;
-}` : ""}
-${wiredBadges.length ? `${wiredBadges.map((selector) => `${selector} > div`).join(",\n")}{
-  height:16px !important;
-  min-width:0 !important;
-  max-width:100%;
-}` : ""}
-${wiredBadges.length ? `${wiredBadges.map((selector) => `${selector} > div *`).join(",\n")}{
-  min-width:0 !important;
-  font-size:9px !important;
-  line-height:15px !important;
 }` : ""}
 ${packRows.length ? `${packRows.join(",\n")}{
   position:absolute !important;
