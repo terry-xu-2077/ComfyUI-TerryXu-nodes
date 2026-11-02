@@ -1585,6 +1585,45 @@ function expandBusListPrompt(graph, prompt) {
   }
 }
 
+function promptInputDeclaration(node, name) {
+  const inputs = node?.constructor?.nodeData?.input;
+  // Autogrow prompt keys are dotted (for example ref_videos.ref_video_0),
+  // while the node definition marks their parent group as optional.
+  for (let key = name; key; key = key.includes(".") ? key.slice(0, key.lastIndexOf(".")) : "") {
+    for (const category of ["optional", "required"]) {
+      const spec = inputs?.[category]?.[key];
+      if (spec) return { optional: category === "optional", lazy: spec[1]?.lazy === true };
+    }
+  }
+  const slot = node?.inputs?.find(input => input.name === name);
+  return slot?.shape === 7 ? { optional: true, lazy: false } : null;
+}
+
+function omitBlockedOptionalReferences(graph, prompt, emptySources) {
+  // Propagate only blockers introduced by our empty media slots. A required
+  // converter input blocks all its outputs, but an optional reference should
+  // be omitted rather than blocking an otherwise runnable generation branch.
+  const blocked = new Set(emptySources);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of graph?._nodes || []) {
+      const id = String(node.id);
+      const data = prompt[id];
+      if (!data?.inputs || blocked.has(id)) continue;
+      for (const [name, value] of Object.entries(data.inputs)) {
+        if (!Array.isArray(value) || value.length !== 2 || !blocked.has(String(value[0]))) continue;
+        const declaration = promptInputDeclaration(node, name);
+        if (!declaration || declaration.lazy) continue;
+        if (declaration.optional) delete data.inputs[name];
+        else { blocked.add(id); break; }
+        changed = true;
+      }
+      if (blocked.has(id)) changed = true;
+    }
+  }
+}
+
 function patchGraphToPrompt() {
   if (app.__terryWireBusPatched) return;
   app.__terryWireBusPatched = true;
@@ -1599,6 +1638,7 @@ function patchGraphToPrompt() {
 
       for (const graph of allGraphs(this.graph || app.graph)) {
         expandBusListPrompt(graph, prompt);
+        const emptySources = new Set();
         for (const unpack of graph?._nodes || []) {
           if (!isUnpack(unpack) || !unpackExpanded(unpack)) continue;
           const pack = findPackFromUnpack(unpack);
@@ -1626,10 +1666,13 @@ function patchGraphToPrompt() {
               if (entry.empty) {
                 // Optional references are absent; required consumers silently
                 // skip their branch through the native ExecutionBlocker adapter.
-                const required = target.node.constructor?.nodeData?.input?.required;
-                if (required && Object.hasOwn(required, input.name)) {
+                const declaration = promptInputDeclaration(target.node, input.name);
+                if (declaration && !declaration.optional) {
                   const blocked = mediaExecutionSource(prompt, { assetId: entry.laneId }, String(entry.mediaPack?.id ?? pack.id));
-                  if (blocked) targetPrompt.inputs[input.name] = blocked;
+                  if (blocked) {
+                    targetPrompt.inputs[input.name] = blocked;
+                    emptySources.add(String(blocked[0]));
+                  }
                 } else delete targetPrompt.inputs[input.name];
                 continue;
               }
@@ -1638,6 +1681,7 @@ function patchGraphToPrompt() {
             }
           }
         }
+        omitBlockedOptionalReferences(graph, prompt, emptySources);
       }
     } catch (error) {
       console.error("[TerryXu Wire Bus] Failed to expand virtual bus", error);
