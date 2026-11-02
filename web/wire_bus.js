@@ -1422,17 +1422,28 @@ function hasProtectedMediaConsumer(node, outputIndex) {
 }
 
 export function mediaAssetHasReferences(pack, assetId) {
-  const lanes = effectivePackLaneEntries(pack).map(entry => entry.lane);
-  for (const unpack of connectedUnpacksForPack(pack)) {
-    if (!unpackExpanded(unpack)) {
-      if (hasProtectedMediaConsumer(unpack, 0)) return true;
-      continue;
-    }
-    ensureUnpackLaneIds(unpack, lanes);
-    for (let index = 0; index < (unpack.outputs?.length || 0); index++) {
-      if (unpack.outputs[index]?.[LANE_FIELD] === assetId && hasProtectedMediaConsumer(unpack, index)) {
-        return true;
+  // Follow both direct Bus-Out links and channel-based Bus-In/Bus-Out bridges.
+  // A wireless receiver may not be physically linked to the original media
+  // loader, so resolve its effective lanes and retain their mediaPack identity.
+  for (const graph of allGraphs()) {
+    for (const unpack of graph?._nodes || []) {
+      if (!isUnpack(unpack)) continue;
+      const sourcePack = findPackFromUnpack(unpack);
+      if (!sourcePack) continue;
+      const entries = effectivePackLaneEntries(sourcePack);
+      const entry = entries.find(item =>
+        item.laneId === assetId && (item.mediaPack || sourcePack) === pack
+      );
+      if (!entry) continue;
+      if (!unpackExpanded(unpack)) {
+        if (hasProtectedMediaConsumer(unpack, 0)) return true;
+        continue;
       }
+      ensureUnpackLaneIds(unpack, entries.map(item => item.lane));
+      const outputIndex = (unpack.outputs || []).findIndex(
+        output => output?.[LANE_FIELD] === assetId
+      );
+      if (outputIndex >= 0 && hasProtectedMediaConsumer(unpack, outputIndex)) return true;
     }
   }
   return hasProtectedMediaConsumer(pack, 0);
