@@ -175,6 +175,7 @@ function install(node) {
   };
   function card(asset, kind, index) {
     const el = document.createElement("article"); el.className = "terry-media-card";
+    let uploading = false, paste;
     el.draggable = true; el.tabIndex = 0; el.dataset.assetId = asset.id;
     el.ariaLabel = `${MEDIA_LABELS[kind]} ${index + 1}，${asset.empty ? "空槽位" : asset.name}，拖动排序`;
     const header = document.createElement("header");
@@ -183,11 +184,34 @@ function install(node) {
       const referenced = mediaAssetHasReferences(node, asset.id);
       if (asset.empty && referenced) return report("此空槽位仍被引用，断开连线后可移除。");
       report(""); update(removeMedia(groups(), kind, asset.id, referenced));
-    }); remove.textContent = "×"; header.append(tag, remove);
+    }); remove.textContent = "×"; header.append(tag);
+    if (kind === "image" && asset.empty) {
+      paste = button("从剪贴板粘贴图片", "terry-media-paste", async () => {
+        if (uploading || paste.disabled) return;
+        if (!navigator.clipboard?.read) return report("当前浏览器无法读取剪贴板图片，请使用拖入图片。");
+        paste.disabled = true; report("");
+        try {
+          const items = await navigator.clipboard.read();
+          const extensions = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/bmp": "bmp", "image/gif": "gif", "image/tiff": "tiff", "image/avif": "avif" };
+          const files = [];
+          for (const item of items) {
+            const type = item.types.find(type => extensions[type]);
+            if (type) files.push(new File([await item.getType(type)], `clipboard-${crypto.randomUUID()}.${extensions[type]}`, { type }));
+          }
+          if (!files.length) return report("剪贴板中没有图片，请先复制图片。");
+          await uploadImages(files);
+        } catch (err) {
+          if (!disposed) report(err.name === "NotAllowedError" ? "无法读取剪贴板，请允许浏览器访问剪贴板后重试。" : err.message);
+        } finally { paste.disabled = uploading; }
+      });
+      paste.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3M9 14h6m-3-3v6"/></svg>';
+      header.append(paste);
+    }
+    header.append(remove);
     const preview = document.createElement("div"); preview.className = "terry-media-preview";
     if (asset.empty) {
       const fill = button("添加" + MEDIA_LABELS[kind], "terry-media-fill", () => void add(kind, fill, false, asset.id));
-      fill.title = "点击选择资产；右键使用 ComfyUI 资产选择器";
+      fill.title = kind === "image" ? "点击选择或拖入图片；右键使用 ComfyUI 资产选择器" : "点击选择资产；右键使用 ComfyUI 资产选择器";
       fill.addEventListener("contextmenu", event => {
         event.preventDefault(); event.stopPropagation(); void add(kind, fill, true, asset.id);
       });
@@ -211,18 +235,63 @@ function install(node) {
       event.preventDefault(); event.stopPropagation(); void add(kind, filename, true, asset.id);
     });
     el.append(header, preview, filename);
+    async function uploadImages(files) {
+      if (uploading || disposed) return;
+      uploading = true; report(""); el.setAttribute("aria-busy", "true");
+      const fill = el.querySelector(".terry-media-fill");
+      fill.disabled = true; fill.textContent = "上传中…"; paste.disabled = true;
+      let targetId = asset.id;
+      try {
+        for (const [fileIndex, file] of files.entries()) {
+          if (disposed) break;
+          const body = new FormData();
+          body.append("image", file); body.append("type", "input");
+          const response = await api.fetchApi("/upload/image", { method: "POST", body });
+          if (!response.ok) throw Error(`图片上传失败：${response.status} ${response.statusText}`);
+          const uploaded = await response.json();
+          if (disposed) break;
+          const next = groups(), targetIndex = next.image.findIndex(item => item.id === targetId);
+          if (targetIndex < 0 || (fileIndex === 0 && !next.image[targetIndex].empty)) break;
+          const image = mediaFile(uploaded, "image", fileIndex === 0 ? asset.id : crypto.randomUUID());
+          if (fileIndex === 0) next.image[targetIndex] = image;
+          else next.image.splice(targetIndex + 1, 0, image);
+          update(next); targetId = image.id;
+        }
+      } catch (err) { if (!disposed) report(err.message); }
+      finally {
+        uploading = false; el.removeAttribute("aria-busy");
+        fill.disabled = false; fill.textContent = "+"; paste.disabled = false;
+      }
+    }
     el.addEventListener("dragstart", event => {
       if (event.target.closest("button,audio,video")) { event.preventDefault(); return; }
       dragging = { kind, id: asset.id }; el.classList.add("is-dragging");
       event.dataTransfer.setData("application/x-terry-media", JSON.stringify(dragging)); event.dataTransfer.effectAllowed = "move";
     });
-    el.addEventListener("dragend", () => { dragging = null; root.querySelectorAll(".is-dragging,.is-drop-target").forEach(item => item.classList.remove("is-dragging", "is-drop-target")); });
+    el.addEventListener("dragend", () => { dragging = null; root.querySelectorAll(".is-dragging,.is-drop-target,.is-file-drop-target").forEach(item => item.classList.remove("is-dragging", "is-drop-target", "is-file-drop-target")); });
     el.addEventListener("dragover", event => {
+      if (kind === "image" && asset.empty && event.dataTransfer.types.includes("Files")) {
+        event.preventDefault(); event.stopPropagation();
+        event.dataTransfer.dropEffect = uploading ? "none" : "copy";
+        if (!uploading) el.classList.add("is-file-drop-target");
+        return;
+      }
       if (dragging?.kind !== kind || dragging.id === asset.id) return;
       event.preventDefault(); event.dataTransfer.dropEffect = "move"; el.classList.add("is-drop-target");
     });
-    el.addEventListener("dragleave", () => el.classList.remove("is-drop-target"));
-    el.addEventListener("drop", event => {
+    el.addEventListener("dragleave", event => {
+      if (el.contains(event.relatedTarget)) return;
+      el.classList.remove("is-drop-target", "is-file-drop-target");
+    });
+    el.addEventListener("drop", async event => {
+      if (kind === "image" && asset.empty && event.dataTransfer.types.includes("Files")) {
+        event.preventDefault(); event.stopPropagation(); el.classList.remove("is-drop-target", "is-file-drop-target");
+        if (uploading) return;
+        const files = Array.from(event.dataTransfer.files).filter(file => /\.(png|jpe?g|webp|bmp|gif|tiff?|avif)$/i.test(file.name));
+        if (!files.length) return report("请拖入图片文件。");
+        await uploadImages(files);
+        return;
+      }
       if (dragging?.kind !== kind) return;
       event.preventDefault(); event.stopPropagation();
       const rect = el.getBoundingClientRect();

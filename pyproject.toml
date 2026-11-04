@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-terryxu-nodes"
-version = "1.0.3"
+version = "1.0.4"
 description = "ComfyUI workflow utilities: H3 prompt editor, media loading, wiring, switches, memory cleanup, and performance monitoring."
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
