@@ -44,7 +44,9 @@ async function openNativePicker(kind, anchor, onSelect, onClose) {
   widget.callback = selected;
   dialog = app.extensionManager.dialog.showExtensionDialog({ key, component,
     props: { widget, nodeType, modelValue: "", "onUpdate:modelValue": selected },
-    dialogComponentProps: { headless: true, contentClass: "terry-media-native-host",
+    // The native picker teleports its popover to body, outside this host.
+    dialogComponentProps: { headless: true, modal: false, dismissableMask: false, dismissOnFocusOutside: false,
+      contentClass: "terry-media-native-host",
       onClose: () => { closed = true; observer?.disconnect(); onClose(); } },
   });
   // Open the same native dropdown used by LoadImage/LoadAudio/LoadVideo.
