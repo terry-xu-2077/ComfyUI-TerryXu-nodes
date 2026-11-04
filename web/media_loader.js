@@ -180,12 +180,15 @@ function install(node) {
     el.ariaLabel = `${MEDIA_LABELS[kind]} ${index + 1}，${asset.empty ? "空槽位" : asset.name}，拖动排序`;
     const header = document.createElement("header");
     const tag = document.createElement("span"); tag.className = "terry-media-tag"; tag.textContent = `${MEDIA_LABELS[kind]} ${index + 1}`;
-    const remove = button("移除 " + (asset.empty ? `${MEDIA_LABELS[kind]} ${index + 1} 空槽位` : asset.name), "terry-media-remove", () => {
+    const clearImage = kind === "image" && !asset.empty;
+    const remove = button((clearImage ? "清空图片 " : "移除 ") + (asset.empty ? `${MEDIA_LABELS[kind]} ${index + 1} 空槽位` : asset.name), "terry-media-remove", () => {
       const referenced = mediaAssetHasReferences(node, asset.id);
       if (asset.empty && referenced) return report("此空槽位仍被引用，断开连线后可移除。");
-      report(""); update(removeMedia(groups(), kind, asset.id, referenced));
-    }); remove.textContent = "×"; header.append(tag);
-    if (kind === "image" && asset.empty) {
+      report(""); update(removeMedia(groups(), kind, asset.id, referenced || clearImage));
+    });
+    remove.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>';
+    header.append(tag);
+    if (kind === "image") {
       paste = button("从剪贴板粘贴图片", "terry-media-paste", async () => {
         if (uploading || paste.disabled) return;
         if (!navigator.clipboard?.read) return report("当前浏览器无法读取剪贴板图片，请使用拖入图片。");
@@ -204,7 +207,7 @@ function install(node) {
           if (!disposed) report(err.name === "NotAllowedError" ? "无法读取剪贴板，请允许浏览器访问剪贴板后重试。" : err.message);
         } finally { paste.disabled = uploading; }
       });
-      paste.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3M9 14h6m-3-3v6"/></svg>';
+      paste.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3"/></svg>';
       header.append(paste);
     }
     header.append(remove);
@@ -239,7 +242,8 @@ function install(node) {
       if (uploading || disposed) return;
       uploading = true; report(""); el.setAttribute("aria-busy", "true");
       const fill = el.querySelector(".terry-media-fill");
-      fill.disabled = true; fill.textContent = "上传中…"; paste.disabled = true;
+      if (fill) { fill.disabled = true; fill.textContent = "上传中…"; }
+      paste.disabled = true;
       let targetId = asset.id;
       try {
         for (const [fileIndex, file] of files.entries()) {
@@ -251,7 +255,7 @@ function install(node) {
           const uploaded = await response.json();
           if (disposed) break;
           const next = groups(), targetIndex = next.image.findIndex(item => item.id === targetId);
-          if (targetIndex < 0 || (fileIndex === 0 && !next.image[targetIndex].empty)) break;
+          if (targetIndex < 0 || (fileIndex === 0 && (next.image[targetIndex].path !== asset.path || next.image[targetIndex].source !== asset.source))) break;
           const image = mediaFile(uploaded, "image", fileIndex === 0 ? asset.id : crypto.randomUUID());
           if (fileIndex === 0) next.image[targetIndex] = image;
           else next.image.splice(targetIndex + 1, 0, image);
@@ -260,7 +264,8 @@ function install(node) {
       } catch (err) { if (!disposed) report(err.message); }
       finally {
         uploading = false; el.removeAttribute("aria-busy");
-        fill.disabled = false; fill.textContent = "+"; paste.disabled = false;
+        if (fill) { fill.disabled = false; fill.textContent = "+"; }
+        paste.disabled = false;
       }
     }
     el.addEventListener("dragstart", event => {
