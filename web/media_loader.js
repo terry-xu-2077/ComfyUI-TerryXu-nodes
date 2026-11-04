@@ -45,7 +45,7 @@ async function openNativePicker(kind, anchor, onSelect, onClose) {
   dialog = app.extensionManager.dialog.showExtensionDialog({ key, component,
     props: { widget, nodeType, modelValue: "", "onUpdate:modelValue": selected },
     // The native picker teleports its popover to body, outside this host.
-    dialogComponentProps: { headless: true, modal: false, dismissableMask: false, dismissOnFocusOutside: false,
+    dialogComponentProps: { headless: true, modal: false, dismissOnFocusOutside: false,
       contentClass: "terry-media-native-host",
       onClose: () => { closed = true; observer?.disconnect(); onClose(); } },
   });
