@@ -6,7 +6,9 @@ const BUS_TYPE = "TERRY_WIRE_BUS";
 const EMPTY_TYPE = "*";
 const LANE_FIELD = "terry_lane_id";
 const PACK_LANES_PROPERTY = "terry_wire_bus_lanes";
+const PACK_NAMED_LANES_PROPERTY = "terry_wire_bus_named_lanes";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
+const PENCIL = "✎";
 
 function nodeType(node) {
   return String(node?.comfyClass || node?.type || node?.constructor?.comfyClass || node?.constructor?.type || "");
@@ -20,6 +22,48 @@ function isReroute(node) {
 }
 function isGet(node) { return nodeType(node) === "GetNode"; }
 function isSet(node) { return nodeType(node) === "SetNode"; }
+
+function localeCode() {
+  try {
+    const value = app?.ui?.settings?.getSettingValue?.("Comfy.Locale");
+    return String(value || navigator.language || "en").trim().toLowerCase().replaceAll("_", "-");
+  } catch {
+    return String(navigator.language || "en").trim().toLowerCase().replaceAll("_", "-");
+  }
+}
+
+function isChineseLocale() {
+  const locale = localeCode();
+  return locale === "zh" || locale.startsWith("zh-");
+}
+
+function labels() {
+  return isChineseLocale()
+    ? {
+        input: "线束",
+        rename: "重命名线束",
+        confirmDelete: (name) => `确定删除线束“${name}”吗？\n\n删除后，该线束的输入连接、总线-出对应端口及其下游连线都会被移除。`,
+      }
+    : {
+        input: "Lane",
+        rename: "Rename lane",
+        confirmDelete: (name) => `Delete lane “${name}”?\n\nIts input connection, matching Bus-Out port, and downstream links will also be removed.`,
+      };
+}
+
+function nodeProperties(node) {
+  if (!node.properties || typeof node.properties !== "object") node.properties = {};
+  return node.properties;
+}
+
+function manualLaneNames(pack) {
+  const properties = nodeProperties(pack);
+  const current = properties[PACK_NAMED_LANES_PROPERTY];
+  if (!current || typeof current !== "object" || Array.isArray(current)) {
+    properties[PACK_NAMED_LANES_PROPERTY] = {};
+  }
+  return properties[PACK_NAMED_LANES_PROPERTY];
+}
 
 function graphLink(graph, id) {
   if (!graph || id == null) return null;
@@ -92,6 +136,13 @@ function cleanName(value) {
   return text && text !== EMPTY_TYPE ? text : "";
 }
 
+function stripDecorations(value) {
+  let text = String(value ?? "").trim();
+  text = text.replace(/^\[(?:空|Empty)\]\s*/i, "");
+  text = text.replace(/\s*(?:✎|❌|×|✕)+\s*$/gu, "").trim();
+  return text.startsWith("lane_") || text === "wire" ? "" : text;
+}
+
 function preferredPortName(source) {
   const output = source?.output;
   if (!output) return "";
@@ -102,7 +153,7 @@ function preferredPortName(source) {
   const semantic = (value) => value && value.toUpperCase() !== type;
 
   // Subgraph outputs can expose the translated data type as their label while
-  // retaining the user-defined port name in `name`.
+  // retaining the user-defined port name in its name field.
   if (semantic(label) && (label !== localized || !semantic(name))) return label;
   if (semantic(name)) return name;
   if (semantic(label)) return label;
@@ -111,29 +162,6 @@ function preferredPortName(source) {
 
 function fallbackType(source, input) {
   return cleanName(source?.output?.type || input?.type || EMPTY_TYPE) || "Input";
-}
-
-function namedEntries(pack) {
-  const entries = [];
-  for (const input of pack?.inputs || []) {
-    const laneId = String(input?.[LANE_FIELD] || "").trim();
-    if (!input || !laneId || input.link == null || input.type === BUS_TYPE) continue;
-    const source = resolveSource(pack.graph, input.link);
-    if (!source) continue;
-    const semantic = preferredPortName(source);
-    const base = semantic || fallbackType(source, input);
-    entries.push({ laneId, input, source, base });
-  }
-
-  const totals = new Map();
-  for (const entry of entries) totals.set(entry.base, (totals.get(entry.base) || 0) + 1);
-  const seen = new Map();
-  for (const entry of entries) {
-    const n = (seen.get(entry.base) || 0) + 1;
-    seen.set(entry.base, n);
-    entry.label = (totals.get(entry.base) || 0) > 1 ? `${entry.base} ${n}` : entry.base;
-  }
-  return entries;
 }
 
 function findPackForUnpack(unpack) {
@@ -153,12 +181,102 @@ function findPackForUnpack(unpack) {
   return null;
 }
 
+function namedEntries(pack) {
+  const entries = [];
+  const manualNames = manualLaneNames(pack);
+  for (const input of pack?.inputs || []) {
+    const laneId = String(input?.[LANE_FIELD] || "").trim();
+    if (!input || !laneId || input.link == null || input.type === BUS_TYPE) continue;
+    const source = resolveSource(pack.graph, input.link);
+    if (!source) continue;
+    const manualName = String(manualNames[laneId] || "").trim();
+    const semantic = manualName ? "" : preferredPortName(source);
+    const base = manualName || semantic || fallbackType(source, input);
+    entries.push({ laneId, input, source, base, manualName });
+  }
+
+  const totals = new Map();
+  for (const entry of entries) totals.set(entry.base, (totals.get(entry.base) || 0) + 1);
+  const seen = new Map();
+  for (const entry of entries) {
+    const n = (seen.get(entry.base) || 0) + 1;
+    seen.set(entry.base, n);
+    entry.label = (totals.get(entry.base) || 0) > 1 ? `${entry.base} ${n}` : entry.base;
+  }
+  return entries;
+}
+
+function laneRecords(pack) {
+  const manualNames = manualLaneNames(pack);
+  const stored = Array.isArray(pack?.properties?.[PACK_LANES_PROPERTY])
+    ? pack.properties[PACK_LANES_PROPERTY]
+    : [];
+  let ordinal = 0;
+  return (pack?.inputs || []).flatMap((input, inputIndex) => {
+    const laneId = String(input?.[LANE_FIELD] || "").trim();
+    if (!input || !laneId || input.type === BUS_TYPE) return [];
+    ordinal += 1;
+    const manualName = String(manualNames[laneId] || "").trim();
+    const storedName = String(stored.find((lane) => lane?.id === laneId)?.name || "").trim();
+    const currentName = stripDecorations(input.label || input.name);
+    const label = manualName || currentName || storedName || `${labels().input} ${ordinal}`;
+    return [{
+      input,
+      inputIndex,
+      laneId,
+      ordinal,
+      named: Boolean(manualName),
+      label,
+    }];
+  });
+}
+
+function syncNodes2InputLabels(pack) {
+  if (typeof document === "undefined") return;
+  const root = [...document.querySelectorAll("[data-node-id]")]
+    .find((element) => String(element.getAttribute("data-node-id")) === String(pack?.id));
+  if (!root) return;
+
+  const rows = [...root.querySelectorAll(".lg-slot--input")]
+    .filter((row) => {
+      const span = row.querySelector(".text-node-component-slot-text");
+      return String(span?.textContent || row.textContent || "").includes(PENCIL);
+    });
+  const entries = laneRecords(pack);
+  rows.forEach((row, index) => {
+    const entry = entries[index];
+    if (!entry) return;
+    row.classList.toggle("terry-wire-bus-named-lane", entry.named);
+    const span = row.querySelector(".text-node-component-slot-text");
+    if (span) span.textContent = `${entry.label}   ${PENCIL}`;
+  });
+}
+
+function syncPackLabels(pack) {
+  if (!isPack(pack)) return;
+  const manualNames = manualLaneNames(pack);
+  const stored = Array.isArray(pack.properties?.[PACK_LANES_PROPERTY])
+    ? pack.properties[PACK_LANES_PROPERTY]
+    : [];
+  for (const input of pack.inputs || []) {
+    const laneId = String(input?.[LANE_FIELD] || "").trim();
+    if (!laneId || input.type === BUS_TYPE) continue;
+    const current = String(input.label || input.name || "");
+    const emptyPrefix = current.match(/^\[(?:空|Empty)\]\s*/i)?.[0] || "";
+    const manualName = String(manualNames[laneId] || "").trim();
+    const storedName = String(stored.find((lane) => lane?.id === laneId)?.name || "").trim();
+    const displayName = manualName || stripDecorations(current) || storedName || labels().input;
+    input.label = `${emptyPrefix}${displayName}   ${PENCIL}${manualName ? "   ❌" : ""}`;
+  }
+  syncNodes2InputLabels(pack);
+}
+
 function applyNames(pack) {
   if (!isPack(pack) || !pack.graph) return;
   const entries = namedEntries(pack);
   for (const entry of entries) {
     entry.input.name = entry.label;
-    entry.input.label = entry.label;
+    entry.input.label = `${entry.label}   ${PENCIL}${entry.manualName ? "   ❌" : ""}`;
     const stored = (pack.properties?.[PACK_LANES_PROPERTY] || [])
       .find((lane) => lane?.id === entry.laneId);
     if (stored) stored.name = entry.label;
@@ -175,6 +293,7 @@ function applyNames(pack) {
     }
     node.setDirtyCanvas?.(true, true);
   }
+  syncPackLabels(pack);
   pack.setDirtyCanvas?.(true, true);
 }
 
@@ -188,29 +307,247 @@ function schedule(node) {
   }, 0);
 }
 
+function renameEntries(pack) {
+  return laneRecords(pack);
+}
+
+function setLaneName(pack, entry, value) {
+  if (!pack || !entry) return;
+  const next = String(value ?? "").trim();
+  const names = manualLaneNames(pack);
+  if (next) names[entry.laneId] = next;
+  else delete names[entry.laneId];
+
+  const stored = (pack.properties?.[PACK_LANES_PROPERTY] || [])
+    .find((lane) => lane?.id === entry.laneId);
+  if (stored) {
+    stored.name = next;
+    stored.named = Boolean(next);
+  }
+  if (next) {
+    entry.input.name = next;
+    entry.input.label = next;
+  } else {
+    entry.input.name = "wire";
+    entry.input.label = "wire";
+  }
+
+  applyNames(pack);
+  syncPackLabels(pack);
+  pack.graph?.change?.();
+  pack.graph?.setDirtyCanvas?.(true, true);
+
+  if (!next) {
+    try {
+      pack.onConnectionsChange?.(globalThis.LiteGraph?.INPUT ?? 1, entry.inputIndex, false, null, entry.input);
+    } catch {}
+  }
+}
+
+function deleteNamedLane(pack, entry) {
+  if (!pack || !entry?.named) return false;
+  const confirmAction = globalThis.confirm;
+  if (typeof confirmAction !== "function" || !confirmAction(labels().confirmDelete(entry.label))) return true;
+
+  const inputIndex = (pack.inputs || []).indexOf(entry.input);
+  if (inputIndex < 0) return true;
+  const names = manualLaneNames(pack);
+  delete names[entry.laneId];
+  const stored = Array.isArray(pack.properties?.[PACK_LANES_PROPERTY])
+    ? pack.properties[PACK_LANES_PROPERTY]
+    : [];
+  nodeProperties(pack)[PACK_LANES_PROPERTY] = stored.filter((lane) => lane?.id !== entry.laneId);
+
+  pack.removeInput?.(inputIndex);
+  try {
+    pack.onConnectionsChange?.(globalThis.LiteGraph?.INPUT ?? 1, inputIndex, false, null, entry.input);
+  } catch {}
+  pack.graph?.change?.();
+  pack.graph?.setDirtyCanvas?.(true, true);
+  schedule(pack);
+  return true;
+}
+
+function inputLocalY(node, slot) {
+  const index = (node?.inputs || []).indexOf(slot);
+  if (index < 0) return null;
+  try {
+    const out = [0, 0];
+    const result = node.getConnectionPos?.(true, index, out) || out;
+    if (Array.isArray(result) && Number.isFinite(result[1])) return result[1] - Number(node.pos?.[1] || 0);
+  } catch {}
+  const height = Number(globalThis.LiteGraph?.NODE_SLOT_HEIGHT) || 20;
+  return (Number(globalThis.LiteGraph?.NODE_TITLE_HEIGHT) || 30) + height * (index + 0.5);
+}
+
+function localPos(node, event, pos) {
+  if (Array.isArray(pos) && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) return pos;
+  if (Number.isFinite(event?.canvasX) && Number.isFinite(event?.canvasY)) {
+    return [
+      event.canvasX - Number(node.pos?.[0] || 0),
+      event.canvasY - Number(node.pos?.[1] || 0),
+    ];
+  }
+  return null;
+}
+
+function tryRenameOrDelete(pack, event, pos) {
+  const point = localPos(pack, event, pos);
+  if (!point) return false;
+  const width = Number(pack.size?.[0]) || 112;
+  for (const entry of renameEntries(pack)) {
+    const y = inputLocalY(pack, entry.input);
+    if (!Number.isFinite(y) || Math.abs(point[1] - y) > 9) continue;
+    if (point[0] < 42 || point[0] > Math.min(width - 8, 150)) continue;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (entry.named && point[0] >= width - 30) {
+      return deleteNamedLane(pack, entry);
+    }
+    const next = globalThis.prompt?.(labels().rename, entry.label);
+    if (next == null) return true;
+    setLaneName(pack, entry, next);
+    return true;
+  }
+  return false;
+}
+
+function installNamedLaneStyle() {
+  if (typeof document === "undefined" || document.getElementById("terry-wire-bus-named-lane-style")) return;
+  const style = document.createElement("style");
+  style.id = "terry-wire-bus-named-lane-style";
+  style.textContent = `
+.lg-slot--input.terry-wire-bus-named-lane{
+  position:relative;
+  padding-right:26px;
+}
+.lg-slot--input.terry-wire-bus-named-lane::after{
+  content:"×";
+  position:absolute;
+  right:7px;
+  top:50%;
+  transform:translateY(-50%);
+  color:#e16b6b;
+  font-size:17px;
+  font-weight:600;
+  line-height:1;
+  pointer-events:none;
+}
+`;
+  document.head.append(style);
+}
+
+function allGraphs(root = app.graph) {
+  if (!root) return [];
+  const result = [];
+  const seen = new Set();
+  const queue = [root];
+  while (queue.length) {
+    const graph = queue.shift();
+    if (!graph || seen.has(graph)) continue;
+    seen.add(graph);
+    result.push(graph);
+    for (const node of graph?._nodes || graph?.nodes || []) if (node?.subgraph) queue.push(node.subgraph);
+    for (const collection of [graph?.subgraphs, graph?._subgraphs]) {
+      if (!collection) continue;
+      const values = typeof collection.values === "function" ? collection.values() : Object.values(collection);
+      for (const value of values) queue.push(value?.subgraph || value);
+    }
+  }
+  return result;
+}
+
+function allNodes() {
+  return allGraphs().flatMap((graph) => graph?._nodes || graph?.nodes || []);
+}
+
+function installNodes2RenameHandler() {
+  if (typeof document === "undefined" || globalThis.__terryWireBusNodes2RenameHandler) return;
+  globalThis.__terryWireBusNodes2RenameHandler = true;
+  document.addEventListener("pointerdown", (event) => {
+    if (event.button != null && event.button !== 0) return;
+    const target = event.target;
+    if (!target?.closest) return;
+    if (target.closest('[data-testid="slot-connection-dot"], [data-testid="slot-dot"]')) return;
+    const row = target.closest(".lg-slot--input");
+    const root = row?.closest?.("[data-node-id]");
+    if (!row || !root) return;
+    const span = row.querySelector(".text-node-component-slot-text");
+    if (!String(span?.textContent || row.textContent || "").includes(PENCIL)) return;
+    const node = allNodes().find((item) => isPack(item) && String(item?.id) === String(root.getAttribute("data-node-id")));
+    if (!node) return;
+    const rows = [...root.querySelectorAll(".lg-slot--input")]
+      .filter((item) => {
+        const label = item.querySelector(".text-node-component-slot-text");
+        return String(label?.textContent || item.textContent || "").includes(PENCIL);
+      });
+    const entry = renameEntries(node)[rows.indexOf(row)];
+    if (!entry) return;
+
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    const rect = row.getBoundingClientRect?.();
+    if (entry.named && rect && Number.isFinite(event.clientX) && event.clientX >= rect.right - 28) {
+      deleteNamedLane(node, entry);
+      return;
+    }
+    const next = globalThis.prompt?.(labels().rename, entry.label);
+    if (next == null) return;
+    setLaneName(node, entry, next);
+    syncNodes2InputLabels(node);
+  }, true);
+}
+
+function patchPackNodeType(nodeTypeClass, nodeData) {
+  if (nodeData?.name !== WIRELESS_PACK_TYPE) return;
+
+  const oldMouse = nodeTypeClass.prototype.onMouseDown;
+  nodeTypeClass.prototype.onMouseDown = function (event, pos) {
+    if (tryRenameOrDelete(this, event, pos)) return true;
+    return oldMouse?.apply(this, arguments);
+  };
+
+  for (const hook of ["onNodeCreated", "onConfigure", "onConnectionsChange"]) {
+    const original = nodeTypeClass.prototype[hook];
+    nodeTypeClass.prototype[hook] = function () {
+      const result = original?.apply(this, arguments);
+      schedule(this);
+      return result;
+    };
+  }
+}
+
 app.registerExtension({
   name: "TerryXu.WireBusNamedPorts",
 
   beforeRegisterNodeDef(nodeType, nodeData) {
     if (![WIRELESS_PACK_TYPE, WIRELESS_UNPACK_TYPE].includes(nodeData?.name)) return;
+    if (nodeData?.name === WIRELESS_PACK_TYPE) patchPackNodeType(nodeType, nodeData);
 
-    const oldConnections = nodeType.prototype.onConnectionsChange;
-    nodeType.prototype.onConnectionsChange = function () {
-      const result = oldConnections?.apply(this, arguments);
-      schedule(this);
-      return result;
-    };
+    if (nodeData?.name === WIRELESS_UNPACK_TYPE) {
+      const oldConnections = nodeType.prototype.onConnectionsChange;
+      nodeType.prototype.onConnectionsChange = function () {
+        const result = oldConnections?.apply(this, arguments);
+        schedule(this);
+        return result;
+      };
 
-    const oldConfigure = nodeType.prototype.onConfigure;
-    nodeType.prototype.onConfigure = function () {
-      const result = oldConfigure?.apply(this, arguments);
-      schedule(this);
-      return result;
-    };
+      const oldConfigure = nodeType.prototype.onConfigure;
+      nodeType.prototype.onConfigure = function () {
+        const result = oldConfigure?.apply(this, arguments);
+        schedule(this);
+        return result;
+      };
+    }
   },
 
   nodeCreated(node) { schedule(node); },
   loadedGraphNode(node) { schedule(node); },
+
+  setup() {
+    installNamedLaneStyle();
+    installNodes2RenameHandler();
+  },
 
   afterConfigureGraph() {
     setTimeout(() => {

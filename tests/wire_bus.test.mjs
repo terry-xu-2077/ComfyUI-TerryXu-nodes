@@ -57,3 +57,81 @@ test("only wireless channel bus nodes are registered", async () => {
   assert.equal(defs.TerryXuWirelessBusPack.display_name, "↔️ 总线-入");
   assert.equal(defs.TerryXuWirelessBusUnpack.display_name, "↔️ 总线-出");
 });
+
+
+test("manually named Bus-In lanes stay pinned when disconnected and keep their custom name", async () => {
+  const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  const graph = { _nodes: [], setDirtyCanvas() {} };
+  const context = vm.createContext({
+    app: { graph, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
+    mediaExecutionSource, navigator: { language: "zh-CN" },
+    LiteGraph: { INPUT: 1, OUTPUT: 2, NODE_TITLE_HEIGHT: 30, NODE_SLOT_HEIGHT: 20 },
+    queueMicrotask() {},
+  });
+  vm.runInContext(source + "\nglobalThis.busTest = {packLaneEntries,refreshPackSlots};", context);
+
+  const lane = { name: "wire", label: "[空] 摄影机模型", type: "*", link: null, terry_lane_id: "lane_camera" };
+  const addWire = { name: "wire", label: "添加线束", type: "*", link: null };
+  const pack = {
+    id: 10,
+    type: "TerryXuWirelessBusPack",
+    graph,
+    properties: { terry_wire_bus_named_lanes: { lane_camera: "摄影机模型" } },
+    inputs: [lane, addWire],
+    outputs: [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }],
+    size: [112, 120],
+    setSize(size) { this.size = size; },
+    removeInput(index) { this.inputs.splice(index, 1); },
+    addInput(name, type) {
+      const input = { name, label: name, type, link: null };
+      this.inputs.push(input);
+      return input;
+    },
+  };
+  graph._nodes.push(pack);
+
+  const entries = context.busTest.packLaneEntries(pack);
+  assert.equal(entries[0].name, "摄影机模型");
+  assert.equal(entries[0].lane.named, true);
+
+  context.busTest.refreshPackSlots(pack);
+  assert.equal(pack.inputs.some((input) => input.terry_lane_id === "lane_camera"), true);
+  assert.equal(pack.properties.terry_wire_bus_named_lanes.lane_camera, "摄影机模型");
+});
+
+test("unnamed empty Bus-In lanes remain eligible for automatic cleanup", async () => {
+  const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  const graph = { _nodes: [], setDirtyCanvas() {} };
+  const context = vm.createContext({
+    app: { graph, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
+    mediaExecutionSource, navigator: { language: "zh-CN" },
+    LiteGraph: { INPUT: 1, OUTPUT: 2, NODE_TITLE_HEIGHT: 30, NODE_SLOT_HEIGHT: 20 },
+    queueMicrotask() {},
+  });
+  vm.runInContext(source + "\nglobalThis.busTest = {refreshPackSlots};", context);
+
+  const lane = { name: "wire", label: "模型", type: "*", link: null, terry_lane_id: "lane_auto" };
+  const addWire = { name: "wire", label: "添加线束", type: "*", link: null };
+  const pack = {
+    id: 11,
+    type: "TerryXuWirelessBusPack",
+    graph,
+    properties: {},
+    inputs: [lane, addWire],
+    outputs: [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }],
+    size: [112, 120],
+    setSize(size) { this.size = size; },
+    removeInput(index) { this.inputs.splice(index, 1); },
+    addInput(name, type) {
+      const input = { name, label: name, type, link: null };
+      this.inputs.push(input);
+      return input;
+    },
+  };
+  graph._nodes.push(pack);
+
+  context.busTest.refreshPackSlots(pack);
+  assert.equal(pack.inputs.some((input) => input.terry_lane_id === "lane_auto"), false);
+});

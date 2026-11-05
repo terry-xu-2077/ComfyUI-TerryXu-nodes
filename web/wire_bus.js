@@ -10,6 +10,7 @@ const LIST_TYPE = "TerryXuBusToList";
 const EMPTY_TYPE = "*";
 
 const PACK_LANES_PROPERTY = "terry_wire_bus_lanes";
+const PACK_NAMED_LANES_PROPERTY = "terry_wire_bus_named_lanes";
 const UNPACK_LANES_PROPERTY = "terry_wire_bus_lane_ids";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
 const UNPACK_OUTPUT_MODE_PROPERTY = "terry_wire_bus_expand_outputs";
@@ -909,6 +910,11 @@ function findPackFromUnpack(unpack) {
 function storedPackLanes(pack) {
   const properties = nodeProperties(pack);
   const raw = Array.isArray(properties[PACK_LANES_PROPERTY]) ? properties[PACK_LANES_PROPERTY] : [];
+  const manualNames = properties[PACK_NAMED_LANES_PROPERTY]
+    && typeof properties[PACK_NAMED_LANES_PROPERTY] === "object"
+    && !Array.isArray(properties[PACK_NAMED_LANES_PROPERTY])
+    ? properties[PACK_NAMED_LANES_PROPERTY]
+    : {};
   const lanes = [];
   const seen = new Set();
   for (const value of raw) {
@@ -916,10 +922,12 @@ function storedPackLanes(pack) {
     const id = String(lane?.id || "").trim();
     if (!id || seen.has(id)) continue;
     seen.add(id);
+    const manualName = String(manualNames[id] || "").trim();
     lanes.push({
       id,
-      name: String(lane.name || "").trim(),
+      name: manualName || String(lane.name || "").trim(),
       type: String(lane.type || EMPTY_TYPE).trim() || EMPTY_TYPE,
+      named: Boolean(manualName),
     });
   }
   properties[PACK_LANES_PROPERTY] = lanes;
@@ -946,6 +954,7 @@ function ensurePackLanes(pack) {
   removeExtraAddWireInputs(pack);
   const stored = storedPackLanes(pack);
   const byId = new Map(stored.map((lane) => [lane.id, lane]));
+  const manualNames = nodeProperties(pack)[PACK_NAMED_LANES_PROPERTY] || {};
   const inputs = pack.inputs || [];
   const hasAddWire = inputs.length > 0 && isAddWireInput(inputs[inputs.length - 1]);
   const laneInputCount = inputs.length - (hasAddWire ? 1 : 0);
@@ -964,10 +973,12 @@ function ensurePackLanes(pack) {
     input[LANE_FIELD] = id;
 
     const previous = byId.get(id) || stored[index] || {};
+    const manualName = String(manualNames[id] || "").trim();
     lanes.push({
       id,
-      name: String(previous.name || input.label || input.name || "").trim(),
+      name: manualName || String(previous.name || input.label || input.name || "").trim(),
       type: String(previous.type || input.type || EMPTY_TYPE).trim() || EMPTY_TYPE,
+      named: Boolean(manualName),
     });
   }
 
@@ -1052,7 +1063,9 @@ function packLaneEntries(pack) {
       input,
       source,
       type: source?.type || lane.type || input?.type || EMPTY_TYPE,
-      name: source?.name || lane.name || input?.label || input?.name || `${labels().input} ${index + 1}`,
+      name: lane.named
+        ? lane.name
+        : (source?.name || lane.name || input?.label || input?.name || `${labels().input} ${index + 1}`),
     };
   });
   const numbered = numberDuplicateTypes(entries);
@@ -1459,7 +1472,10 @@ function refreshPackSlots(pack) {
   for (const unpack of connectedUnpacksForPack(pack)) syncUnpack(unpack, true);
 
   const removable = entries.filter((entry) =>
-    !entry.source && entry.input?.link == null && !laneHasOutputLinks(pack, entry.laneId)
+    !entry.lane?.named
+    && !entry.source
+    && entry.input?.link == null
+    && !laneHasOutputLinks(pack, entry.laneId)
   );
   for (const entry of removable) {
     const index = (pack.inputs || []).findIndex((input) => input?.[LANE_FIELD] === entry.laneId);
