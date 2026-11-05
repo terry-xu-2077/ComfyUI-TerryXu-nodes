@@ -326,7 +326,9 @@ function setLaneName(pack, entry, value) {
   }
   if (next) {
     entry.input.name = next;
-    entry.input.label = next;
+    entry.input.label = entry.input.link == null
+      ? `${isChineseLocale() ? "[空] " : "[Empty] "}${next}`
+      : next;
   } else {
     entry.input.name = "wire";
     entry.input.label = "wire";
