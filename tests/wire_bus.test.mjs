@@ -340,3 +340,39 @@ test("delete affordance appears after hovering a named port label and stays whil
   for (const handler of listeners.pointerout || []) handler({ target, relatedTarget: {} });
   assert.equal(classes.has("terry-wire-bus-port-actions-visible"), false);
 });
+
+test("Bus-Out keeps its manual width with a Media Loader source", async () => {
+  const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  const context = vm.createContext({
+    app: { graph: { _nodes: [] }, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
+    mediaExecutionSource, navigator: { language: "zh-CN" },
+    LiteGraph: { INPUT: 1, OUTPUT: 2, NODE_TITLE_HEIGHT: 30, NODE_SLOT_HEIGHT: 20 },
+    queueMicrotask() {},
+  });
+  vm.runInContext(source + "\nglobalThis.layoutTest = { findPackFromUnpack, effectivePackLaneEntries, resizeCompactBusNode };", context);
+  let lanes = Array.from({ length: 9 }, (_, index) => ({ laneId: `media_${index}`, lane: { id: `media_${index}` }, type: index < 6 ? "IMAGE" : "AUDIO" }));
+  const graph = {
+    _nodes: [],
+    links: { 1: { id: 1, origin_id: 90, origin_slot: 0, target_id: 91, target_slot: 0 } },
+    getNodeById(id) { return this._nodes.find((node) => String(node.id) === String(id)); },
+  };
+  const mediaPack = { id: 90, type: "TerryXuMediaLoader", graph, outputs: [{ type: "TERRY_WIRE_BUS", links: [1] }], __terryBusLaneEntries: () => lanes };
+  const busOut = { id: 91, type: "TerryXuWirelessBusUnpack", graph, inputs: [{ link: 1, type: "TERRY_WIRE_BUS" }], properties: { terry_wire_bus_width: 264 }, size: [264, 120], setSize(size) { this.size = size; } };
+  graph._nodes.push(mediaPack, busOut);
+  const pairedPack = context.layoutTest.findPackFromUnpack(busOut);
+  assert.equal(pairedPack, mediaPack);
+  const first = context.layoutTest.effectivePackLaneEntries(pairedPack);
+  context.layoutTest.resizeCompactBusNode(busOut, first.length, pairedPack);
+  const firstHeight = busOut.size[1];
+  assert.equal(first.length, 9);
+  assert.equal(busOut.size[0], 264);
+  assert.equal(busOut.properties.terry_wire_bus_width, 264);
+  lanes = [...lanes, ...Array.from({ length: 6 }, (_, index) => ({ laneId: `extra_${index}`, lane: { id: `extra_${index}` }, type: "VIDEO" }))];
+  const next = context.layoutTest.effectivePackLaneEntries(pairedPack);
+  context.layoutTest.resizeCompactBusNode(busOut, next.length, pairedPack);
+  assert.equal(next.length, 15);
+  assert.equal(busOut.size[0], 264);
+  assert.ok(busOut.size[1] > firstHeight);
+  assert.equal(busOut.widgets_start_y, busOut.size[1] - 70);
+});
