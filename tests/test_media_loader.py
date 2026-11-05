@@ -64,6 +64,13 @@ class MediaLoaderTests(unittest.TestCase):
         video = media.MediaBusItem.execute(bus, "v").result[0]
         self.assertEqual(video.get_dimensions(), (16, 16))
 
+    def test_missing_bus_item_returns_execution_blocker(self):
+        from comfy_execution.graph_utils import ExecutionBlocker
+        bus = media.MediaLoader.execute(json.dumps(self.groups)).result[0]
+        value = media.MediaBusItem.execute(bus, "__terry_bus_empty_99_0").result[0]
+        self.assertIsInstance(value, ExecutionBlocker)
+        self.assertIsNone(value.message)
+
     def test_cache_fingerprint_tracks_order_and_file_changes(self):
         first = media.MediaLoader.fingerprint_inputs(json.dumps(self.groups))
         self.groups["image"].reverse()
