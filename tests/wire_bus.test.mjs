@@ -280,6 +280,63 @@ test("Bus-In and Bus-Out edit icons are shown only while hovering a port label",
   assert.match(bus, /terry_wire_bus_width/);
   assert.match(visual, /width:\$\{compactWidth\}px !important/);
   assert.match(namedPorts, /\.text-node-component-slot-text:hover::after/);
-  assert.match(namedPorts, /:has\(\.text-node-component-slot-text:hover\)::after/);
+  assert.match(namedPorts, /terry-wire-bus-port-actions-visible::after/);
+  assert.match(namedPorts, /document\.addEventListener\("pointerover"/);
+  assert.match(namedPorts, /document\.addEventListener\("pointerout"/);
   assert.doesNotMatch(namedPorts, /label = `\$\{entry\.label\}   \$\{PENCIL\}/);
+});
+
+
+test("delete affordance appears after hovering a named port label and stays while moving to it", async () => {
+  const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "");
+  const listeners = {};
+  const document = {
+    getElementById() { return null; },
+    createElement() { return { id: "", textContent: "" }; },
+    head: { append() {} },
+    addEventListener(name, handler) { (listeners[name] ||= []).push(handler); },
+    querySelectorAll() { return []; },
+  };
+  const extensions = [];
+  const context = vm.createContext({
+    app: { graph: { _nodes: [] }, registerExtension(extension) { extensions.push(extension); } },
+    document,
+    navigator: { language: "zh-CN" },
+    showTextPrompt: () => Promise.resolve(null),
+    showConfirm: () => Promise.resolve(false),
+  });
+  vm.runInContext(source, context);
+  extensions[0].setup();
+
+  const classes = new Set();
+  const row = {
+    classList: {
+      add(...names) { names.forEach((name) => classes.add(name)); },
+      remove(...names) { names.forEach((name) => classes.delete(name)); },
+      contains(name) { return classes.has(name); },
+    },
+    contains(target) { return target === this || target === span; },
+  };
+  const span = {
+    closest(selector) {
+      return selector === ".lg-slot--input.terry-wire-bus-named-lane" ? row : null;
+    },
+  };
+  const target = {
+    closest(selector) {
+      if (selector === ".text-node-component-slot-text") return span;
+      if (selector === ".lg-slot--input.terry-wire-bus-named-lane") return row;
+      return null;
+    },
+  };
+
+  for (const handler of listeners.pointerover || []) handler({ target });
+  assert.equal(classes.has("terry-wire-bus-port-actions-visible"), true);
+
+  for (const handler of listeners.pointerout || []) handler({ target, relatedTarget: row });
+  assert.equal(classes.has("terry-wire-bus-port-actions-visible"), true);
+
+  for (const handler of listeners.pointerout || []) handler({ target, relatedTarget: {} });
+  assert.equal(classes.has("terry-wire-bus-port-actions-visible"), false);
 });

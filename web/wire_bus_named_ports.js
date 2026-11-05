@@ -598,8 +598,7 @@ function installNamedLaneStyle() {
   transition:opacity .12s ease;
   pointer-events:none;
 }
-.lg-slot--input.terry-wire-bus-named-lane:has(.text-node-component-slot-text:hover)::after,
-.lg-slot--input.terry-wire-bus-named-lane:hover::after{
+.lg-slot--input.terry-wire-bus-named-lane.terry-wire-bus-port-actions-visible::after{
   opacity:1;
 }
 `;
@@ -633,6 +632,17 @@ function allNodes() {
 function installNodes2RenameHandler() {
   if (typeof document === "undefined" || globalThis.__terryWireBusNodes2RenameHandler) return;
   globalThis.__terryWireBusNodes2RenameHandler = true;
+  document.addEventListener("pointerover", (event) => {
+    const span = event.target?.closest?.(".text-node-component-slot-text");
+    const row = span?.closest?.(".lg-slot--input.terry-wire-bus-named-lane");
+    row?.classList.add("terry-wire-bus-port-actions-visible");
+  });
+  document.addEventListener("pointerout", (event) => {
+    const row = event.target?.closest?.(".lg-slot--input.terry-wire-bus-named-lane");
+    if (!row || row.contains(event.relatedTarget)) return;
+    row.classList.remove("terry-wire-bus-port-actions-visible");
+  });
+
   document.addEventListener("pointerdown", (event) => {
     if (event.button != null && event.button !== 0) return;
     const target = event.target;
