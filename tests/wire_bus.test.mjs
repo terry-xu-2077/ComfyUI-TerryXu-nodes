@@ -449,3 +449,160 @@ test("Bus-Out ports connected directly to Media Loader support persistent renami
   assert.equal(unpack.outputs.find(output => output.terry_lane_id === "cover").name, "主视觉参考");
   assert.equal(secondUnpack.outputs.find(output => output.terry_lane_id === "cover").name, "主视觉参考");
 });
+
+
+test("Media Loader replacement preserves Bus-Out links and keeps H3 inputs in media order", async () => {
+  const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  const graph = {
+    _nodes: [],
+    links: {
+      1: { id: 1, origin_id: 1, origin_slot: 0, target_id: 2, target_slot: 0, type: BUS },
+      2: { id: 2, origin_id: 2, origin_slot: 0, target_id: 3, target_slot: 0, type: "IMAGE" },
+      3: { id: 3, origin_id: 2, origin_slot: 1, target_id: 3, target_slot: 1, type: "IMAGE" },
+    },
+    getNodeById(id) { return this._nodes.find(node => String(node.id) === String(id)); },
+    setDirtyCanvas() {},
+  };
+  const app = {
+    graph,
+    ui: { settings: { getSettingValue: () => "zh-CN" } },
+    registerExtension() {},
+    graphToPrompt: async () => ({ output: {
+      "1": { class_type: "TerryXuMediaLoader", inputs: { assets_json: "{}" } },
+      "4": { class_type: "TerryXuMediaLoader", inputs: { assets_json: "{}" } },
+      "3": { class_type: "MiniMaxH3ReferenceToVideo", inputs: {
+        "ref_images.ref_image_0": ["2", 0],
+        "ref_images.ref_image_1": ["2", 1],
+        prompt: "test",
+      } },
+    } }),
+  };
+  const context = vm.createContext({
+    app, mediaExecutionSource, navigator: { language: "zh-CN" },
+    LiteGraph: { INPUT: 1, OUTPUT: 2, NODE_TITLE_HEIGHT: 30, NODE_SLOT_HEIGHT: 20 },
+    queueMicrotask() {},
+  });
+  vm.runInContext(source + "\nglobalThis.busTest = { syncUnpack, patchGraphToPrompt };", context);
+
+  let firstGroups = { image: [asset("a"), asset("b")], audio: [], video: [] };
+  let secondGroups = { image: [asset("x"), asset("y")], audio: [], video: [] };
+  const makeMediaLoader = (id, getGroups) => {
+    const node = {
+      id, type: "TerryXuMediaLoader", graph, size: [640, 740],
+      outputs: [{ name: "bus", type: BUS, links: [] }],
+    };
+    node.__terryBusLaneEntries = () => mediaLanes(node, getGroups());
+    return node;
+  };
+  const firstLoader = makeMediaLoader(1, () => firstGroups);
+  const secondLoader = makeMediaLoader(4, () => secondGroups);
+  firstLoader.outputs[0].links = [1];
+
+  const makeOutput = (name, type, laneId, slot, links) => {
+    const output = { name, label: name, type, terry_lane_id: laneId };
+    Object.defineProperty(output, "links", {
+      get: () => Object.values(graph.links)
+        .filter(link => link.origin_id === 2 && link.origin_slot === slot)
+        .map(link => link.id),
+    });
+    return output;
+  };
+  const busOut = {
+    id: 2, type: "TerryXuWirelessBusUnpack", graph,
+    inputs: [{ name: "bus", type: BUS, link: 1 }],
+    outputs: [
+      makeOutput("图片 1", "IMAGE", "a", 0, [2]),
+      makeOutput("图片 2", "IMAGE", "b", 1, [3]),
+    ],
+    properties: {}, widgets: [], size: [160, 200],
+    setSize(size) { this.size = size; },
+    setDirtyCanvas() {},
+    addOutput(name, type) {
+      const slot = this.outputs.length;
+      const output = makeOutput(name, type, "", slot, []);
+      this.outputs.push(output);
+      return output;
+    },
+    removeOutput(index) { this.outputs.splice(index, 1); },
+    disconnectOutput(index, target, targetSlot) {
+      for (const id of [...(this.outputs[index]?.links || [])]) delete graph.links[id];
+    },
+  };
+  const h3 = {
+    id: 3, type: "MiniMaxH3ReferenceToVideo", graph,
+    inputs: [
+      { name: "ref_images.ref_image_0", link: 2 },
+      { name: "ref_images.ref_image_1", link: 3 },
+    ],
+  };
+  graph._nodes.push(firstLoader, secondLoader, busOut, h3);
+  context.busTest.syncUnpack(busOut, true);
+  const stablePorts = [...busOut.outputs];
+  assert.equal(busOut.outputs[0].terry_lane_id, "a");
+  assert.equal(busOut.outputs[1].terry_lane_id, "b");
+
+  // Disconnecting the old loader is a transient state: it must not remove
+  // output slots or sever either H3 connection.
+  busOut.inputs[0].link = null;
+  delete graph.links[1];
+  firstLoader.outputs[0].links = [];
+  context.busTest.syncUnpack(busOut, true);
+  assert.equal(busOut.outputs[0], stablePorts[0]);
+  assert.equal(busOut.outputs[1], stablePorts[1]);
+  assert.deepEqual(busOut.outputs.map(output => output.links), [[2], [3]]);
+  assert.equal(graph.links[2].origin_slot, 0);
+  assert.equal(graph.links[3].origin_slot, 1);
+
+  // A different loader may have completely different asset IDs. The Bus-Out
+  // ports remain positional and are rebound to the new loader in-place.
+  graph.links[4] = { id: 4, origin_id: 4, origin_slot: 0, target_id: 2, target_slot: 0, type: BUS };
+  secondLoader.outputs[0].links = [4];
+  busOut.inputs[0].link = 4;
+  context.busTest.syncUnpack(busOut, true);
+  assert.equal(busOut.outputs[0], stablePorts[0]);
+  assert.equal(busOut.outputs[1], stablePorts[1]);
+  assert.deepEqual(busOut.outputs.map(output => output.terry_lane_id), ["x", "y"]);
+  assert.deepEqual(busOut.outputs.map(output => output.links), [[2], [3]]);
+  assert.equal(graph.links[2].origin_slot, 0);
+  assert.equal(graph.links[3].origin_slot, 1);
+  assert.equal(h3.inputs[0].link, 2);
+  assert.equal(h3.inputs[1].link, 3);
+
+  context.busTest.patchGraphToPrompt();
+  let { output } = await app.graphToPrompt();
+  assert.deepEqual(output["3"].inputs["ref_images.ref_image_0"], ["4:media:x", 0]);
+  assert.deepEqual(output["3"].inputs["ref_images.ref_image_1"], ["4:media:y", 0]);
+
+  // Sorting the new loader changes which asset each numbered output carries,
+  // not the physical H3 input slot connected to that output.
+  secondGroups = moveMedia(secondGroups, "image", "y", "x");
+  context.busTest.syncUnpack(busOut, true);
+  assert.equal(busOut.outputs[0], stablePorts[0]);
+  assert.equal(busOut.outputs[1], stablePorts[1]);
+  assert.deepEqual(busOut.outputs.map(output => output.terry_lane_id), ["y", "x"]);
+  assert.equal(graph.links[2].origin_slot, 0);
+  assert.equal(graph.links[3].origin_slot, 1);
+  ({ output } = await app.graphToPrompt());
+  assert.deepEqual(output["3"].inputs["ref_images.ref_image_0"], ["4:media:y", 0]);
+  assert.deepEqual(output["3"].inputs["ref_images.ref_image_1"], ["4:media:x", 0]);
+  assert.equal(output["4:media:y"].inputs.asset_id, "y");
+  assert.equal(output["4:media:x"].inputs.asset_id, "x");
+
+  // If the replacement source has fewer assets, keep the extra connected port
+  // as an empty slot. It can be populated again without rebuilding the cable.
+  secondGroups = { image: [asset("y")], audio: [], video: [] };
+  context.busTest.syncUnpack(busOut, true);
+  assert.equal(busOut.outputs.length, 2);
+  assert.equal(busOut.outputs[0].terry_lane_id, "y");
+  assert.equal(busOut.outputs[1].terry_lane_id, "__terry_bus_empty_2_1");
+  assert.deepEqual(busOut.outputs[1].links, [3]);
+  assert.equal(graph.links[3].origin_slot, 1);
+
+  secondGroups = { image: [asset("y"), asset("z")], audio: [], video: [] };
+  context.busTest.syncUnpack(busOut, true);
+  assert.equal(busOut.outputs[1], stablePorts[1]);
+  assert.equal(busOut.outputs[1].terry_lane_id, "z");
+  assert.deepEqual(busOut.outputs[1].links, [3]);
+  assert.equal(graph.links[3].origin_slot, 1);
+});
