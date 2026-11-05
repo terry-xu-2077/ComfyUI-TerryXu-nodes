@@ -1136,9 +1136,40 @@ function syncConnectionType(graph, linkId, type) {
   }
 }
 
+function mediaLaneSource(pack, entries) {
+  if (isMediaPack(pack)) return pack;
+  return entries.find((entry) => entry?.mediaPack)?.mediaPack || null;
+}
+
+function mediaEntriesForUnpack(unpack, pack, entries) {
+  const mediaPack = mediaLaneSource(pack, entries);
+  if (!mediaPack) return entries;
+
+  const total = Math.max(entries.length, unpack.outputs?.length || 0);
+  const result = [...entries];
+  for (let index = entries.length; index < total; index++) {
+    const output = unpack.outputs?.[index];
+    const previousName = String(output?.name || output?.label || "")
+      .replace(/^\[(?:空|Empty)\]\s*/i, "").trim();
+    const laneId = `__terry_bus_empty_${unpack.id}_${index}`;
+    const type = String(output?.type || EMPTY_TYPE);
+    result.push({
+      laneId,
+      lane: { id: laneId, type },
+      type,
+      name: previousName || `${labels().input} ${index + 1}`,
+      source: null,
+      empty: true,
+      mediaPack,
+      synthetic: true,
+    });
+  }
+  return result;
+}
+
 function signatureForEntries(entries) {
   return entries.map((entry) =>
-    `${entry.laneId}:${entry.source?.nodeId ?? ""}:${entry.source?.slot ?? ""}:${entry.type}:${entry.name}`
+    `${entry.laneId}:${entry.mediaPack?.id ?? ""}:${entry.source?.nodeId ?? ""}:${entry.source?.slot ?? ""}:${entry.type}:${entry.name}:${entry.empty ? "empty" : "full"}`
   ).join("|");
 }
 
@@ -1319,7 +1350,15 @@ function syncUnpack(unpack, force = false) {
     if (isWirelessUnpack(unpack)) unpack.__terryWirelessControl?.refresh?.();
 
     const pack = findPackFromUnpack(unpack);
-    const entries = pack ? effectivePackLaneEntries(pack) : [];
+    if (!pack && unpackExpanded(unpack) && (unpack.outputs?.length || 0) > 0) {
+      // A temporary upstream disconnect must not tear down the Bus-Out interface.
+      // Keep every output slot and its downstream links until another source is connected.
+      unpack.__terryBusSignature = null;
+      unpack.__terryBusRefreshVisual?.();
+      unpack.graph?.setDirtyCanvas?.(true, true);
+      return;
+    }
+    let entries = pack ? effectivePackLaneEntries(pack) : [];
 
     if (!unpackExpanded(unpack)) {
       const signature = `BUS:${String(pack?.id ?? "")}:${wirelessChannelName(unpack)}`;
@@ -1341,56 +1380,76 @@ function syncUnpack(unpack, force = false) {
 
     clearBusOnlyOutputForExpanded(unpack);
 
+    const hasMediaLanes = Boolean(mediaLaneSource(pack, entries));
+    if (hasMediaLanes) {
+      // Media Bus-Out ports belong to their ordinal positions, not asset IDs.
+      // This keeps H3 input wiring fixed while the media assigned to each
+      // numbered output follows the Media Loader's current order.
+      entries = mediaEntriesForUnpack(unpack, pack, entries);
+    }
+
     const signature = `EXP:${signatureForEntries(entries)}`;
-    if (!force && unpack.__terryBusSignature === signature) {
+    const mediaPortsMatch = hasMediaLanes
+      && (unpack.outputs?.length || 0) === entries.length
+      && unpack.outputs.every((output, index) =>
+        output?.[LANE_FIELD] === entries[index].laneId
+        && output.type === entries[index].type
+        && output.name === (entries[index].synthetic
+          ? emptyLaneLabel(entries[index].name, index)
+          : (entries[index].source || entries[index].mediaPack
+            ? entries[index].name
+            : emptyLaneLabel(entries[index].name, index)))
+      );
+    if (!force && unpack.__terryBusSignature === signature
+      && (!hasMediaLanes || mediaPortsMatch)) {
       resizeCompactBusNode(unpack, entries.length, pack);
       unpack.__terryBusRefreshVisual?.();
       return;
     }
     unpack.__terryBusSignature = signature;
 
-    ensureUnpackLaneIds(unpack, entries.map((entry) => entry.lane));
-    const desiredIds = new Set(entries.map((entry) => entry.laneId));
-    const hasMediaLanes = isMediaPack(pack) || entries.some(entry => entry.mediaPack);
-    const mediaOrderOnly = hasMediaLanes
-      && (unpack.outputs?.length || 0) === entries.length
-      && unpack.outputs.every((output, index) =>
-        desiredIds.has(output[LANE_FIELD]) && output.type === entries[index].type);
-    if (mediaOrderOnly) {
-      // Sorting changes the media at each numbered port, never the wire endpoint.
-      unpack.outputs.forEach((output, index) => { output[LANE_FIELD] = entries[index].laneId; });
-    }
+    if (hasMediaLanes) {
+      while ((unpack.outputs?.length || 0) < entries.length) {
+        const index = unpack.outputs?.length || 0;
+        const entry = entries[index];
+        const added = unpack.addOutput?.(entry?.name || labels().output, entry?.type || EMPTY_TYPE);
+        if (!unpack.outputs?.[index] && !added) break;
+      }
+      for (let index = 0; index < entries.length; index++) {
+        const entry = entries[index];
+        const output = unpack.outputs?.[index];
+        if (!output) continue;
+        output[LANE_FIELD] = entry.laneId;
+        output.type = entry.type || EMPTY_TYPE;
+        output.name = entry.synthetic
+          ? emptyLaneLabel(entry.name, index)
+          : (entry.source || entry.mediaPack
+            ? entry.name
+            : emptyLaneLabel(entry.name || `${labels().input} ${index + 1}`, index));
+        output.label = output.name;
+        for (const linkId of output.links || []) syncConnectionType(unpack.graph, linkId, output.type);
+      }
+    } else {
+      ensureUnpackLaneIds(unpack, entries.map((entry) => entry.lane));
+      const desiredIds = new Set(entries.map((entry) => entry.laneId));
 
-    for (let index = (unpack.outputs?.length || 0) - 1; index >= 0; index--) {
-      const output = unpack.outputs[index];
-      if (desiredIds.has(output?.[LANE_FIELD])) continue;
-      disconnectAllOutputLinks(unpack, index);
-      unpack.removeOutput?.(index);
-    }
+      for (let index = (unpack.outputs?.length || 0) - 1; index >= 0; index--) {
+        const output = unpack.outputs[index];
+        if (desiredIds.has(output?.[LANE_FIELD])) continue;
+        disconnectAllOutputLinks(unpack, index);
+        unpack.removeOutput?.(index);
+      }
 
-    for (const entry of entries) {
-      let output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
-      if (!output) {
-        const previousLength = unpack.outputs?.length || 0;
-        const added = unpack.addOutput?.(entry.name || labels().output, entry.type || EMPTY_TYPE);
-        output = unpack.outputs?.[previousLength] || added;
-        if (output) output[LANE_FIELD] = entry.laneId;
+      for (const entry of entries) {
+        let output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
+        if (!output) {
+          const previousLength = unpack.outputs?.length || 0;
+          const added = unpack.addOutput?.(entry.name || labels().output, entry.type || EMPTY_TYPE);
+          output = unpack.outputs?.[previousLength] || added;
+          if (output) output[LANE_FIELD] = entry.laneId;
+        }
       }
     }
-
-    if (hasMediaLanes && !mediaOrderOnly) {
-      // Preserve surviving asset connections when ports are added or removed.
-      const connections = new Map(unpack.outputs.map(output => [output, [...(output.links || [])]]));
-      const ordered = entries.map(entry => unpack.outputs.find(output => output[LANE_FIELD] === entry.laneId));
-      unpack.outputs.splice(0, unpack.outputs.length, ...ordered);
-      ordered.forEach((output, index) => {
-        for (const id of connections.get(output) || []) {
-          const link = getLink(unpack.graph, id);
-          if (link) link.origin_slot = index;
-        }
-      });
-    }
-
     for (let index = 0; index < entries.length; index++) {
       const entry = entries[index];
       const output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
@@ -1401,7 +1460,9 @@ function syncUnpack(unpack, force = false) {
         output.name = "bus";
         output.label = labels().bus;
       } else {
-        output.name = entry.source || entry.mediaPack ? entry.name : emptyLaneLabel(entry.name, index);
+        output.name = entry.synthetic
+          ? emptyLaneLabel(entry.name, index)
+          : (entry.source || entry.mediaPack ? entry.name : emptyLaneLabel(entry.name, index));
         output.label = output.name;
       }
       for (const linkId of output.links || []) syncConnectionType(unpack.graph, linkId, output.type);
@@ -1695,7 +1756,7 @@ function patchGraphToPrompt() {
           if (!isUnpack(unpack) || !unpackExpanded(unpack)) continue;
           const pack = findPackFromUnpack(unpack);
           if (!pack) continue;
-          const entries = effectivePackLaneEntries(pack);
+          const entries = mediaEntriesForUnpack(unpack, pack, effectivePackLaneEntries(pack));
 
           for (const entry of entries) {
             const source = entry?.source;
