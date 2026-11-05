@@ -165,8 +165,9 @@ test("renaming a Bus-Out lane updates its owning Bus-In and every paired Bus-Out
     links: {
       1: { id: 1, origin_id: 1, origin_slot: 0, target_id: 2, target_slot: 0 },
       2: { id: 2, origin_id: 2, origin_slot: 0, target_id: 3, target_slot: 0 },
-      3: { id: 3, origin_id: 2, origin_slot: 0, target_id: 4, target_slot: 0 },
+      3: { id: 3, origin_id: 2, origin_slot: 0, target_id: 6, target_slot: 0 },
       4: { id: 4, origin_id: 4, origin_slot: 0, target_id: 5, target_slot: 0 },
+      5: { id: 5, origin_id: 6, origin_slot: 0, target_id: 4, target_slot: 0 },
     },
     getNodeById(id) { return this._nodes.find((node) => String(node.id) === String(id)); },
     change() {},
@@ -206,10 +207,16 @@ test("renaming a Bus-Out lane updates its owning Bus-In and every paired Bus-Out
     outputs: [{ name: "MODEL", label: "MODEL", type: "MODEL", terry_lane_id: "lane_model", links: [] }],
     setDirtyCanvas() {},
   };
+  const relayUnpack = {
+    id: 6, type: "TerryXuWirelessBusUnpack", graph,
+    inputs: [{ name: "bus", type: "TERRY_WIRE_BUS", link: 3 }],
+    outputs: [{ name: "bus", label: "bus", type: "TERRY_WIRE_BUS", links: [5] }],
+    setDirtyCanvas() {},
+  };
   const bridgePack = {
     id: 4, type: "TerryXuWirelessBusPack", graph,
     properties: { terry_wire_bus_lanes: [{ id: "bridge_bus", name: "bus", type: "TERRY_WIRE_BUS" }] },
-    inputs: [{ name: "bus", label: "bus", type: "TERRY_WIRE_BUS", link: 3, terry_lane_id: "bridge_bus" }],
+    inputs: [{ name: "bus", label: "bus", type: "TERRY_WIRE_BUS", link: 5, terry_lane_id: "bridge_bus" }],
     outputs: [{ name: "bus", label: "bus", type: "TERRY_WIRE_BUS", links: [4] }],
     size: [180, 120],
     setDirtyCanvas() {},
@@ -220,7 +227,7 @@ test("renaming a Bus-Out lane updates its owning Bus-In and every paired Bus-Out
     outputs: [{ name: "MODEL", label: "MODEL", type: "MODEL", terry_lane_id: "lane_model", links: [] }],
     setDirtyCanvas() {},
   };
-  graph._nodes.push(sourceNode, pack, directUnpack, bridgePack, bridgedUnpack);
+  graph._nodes.push(sourceNode, pack, directUnpack, relayUnpack, bridgePack, bridgedUnpack);
 
   const outputEntry = context.busNamedTest.outputRenameEntries(bridgedUnpack)[0];
   assert.equal(outputEntry.pack, pack);

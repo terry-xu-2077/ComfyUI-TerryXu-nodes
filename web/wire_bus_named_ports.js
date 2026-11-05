@@ -232,6 +232,30 @@ function laneRecords(pack) {
   });
 }
 
+function upstreamPackForBusInput(pack, input, seen = new Set()) {
+  const graph = pack?.graph;
+  const linkId = input?.link;
+  if (!graph || linkId == null) return null;
+  const key = `${graph?.id || "g"}:${linkId}`;
+  if (seen.has(key)) return null;
+  seen.add(key);
+
+  const link = graphLink(graph, linkId);
+  const source = graph.getNodeById?.(link?.origin_id ?? link?.originId);
+  if (isPack(source)) return source;
+  if (isUnpack(source)) return findPackForUnpack(source);
+  if (isReroute(source)) return upstreamPackForBusInput(pack, source.inputs?.[0], seen);
+  if (isGet(source)) {
+    const setter = findSetter(source);
+    return setter?.inputs?.[0]
+      ? upstreamPackForBusInput(setter, setter.inputs[0], seen)
+      : null;
+  }
+
+  const resolved = resolveSource(graph, linkId);
+  return resolved && isPack(resolved.node) ? resolved.node : null;
+}
+
 function findLaneOwner(pack, laneId, seen = new Set()) {
   if (!pack || !laneId || seen.has(pack)) return null;
   seen.add(pack);
@@ -242,12 +266,8 @@ function findLaneOwner(pack, laneId, seen = new Set()) {
   const busInput = (pack.inputs || []).find((input) =>
     input?.type === BUS_TYPE && input.link != null
   );
-  if (!busInput) return null;
-
-  const upstream = resolveSource(pack.graph, busInput.link);
-  return upstream && isPack(upstream.node)
-    ? findLaneOwner(upstream.node, laneId, seen)
-    : null;
+  const upstream = upstreamPackForBusInput(pack, busInput);
+  return upstream ? findLaneOwner(upstream, laneId, seen) : null;
 }
 
 function outputRenameEntries(unpack) {
