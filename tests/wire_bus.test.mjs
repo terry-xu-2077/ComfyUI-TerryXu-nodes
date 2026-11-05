@@ -380,7 +380,7 @@ test("Bus-Out keeps its manual width with a Media Loader source", async () => {
 
 test("Bus-Out ports connected directly to Media Loader support persistent renaming", async () => {
   const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
-    .replace(/^import .*;\\r?\\n/gm, "");
+    .replace(/^import .*;\r?\n/gm, "");
   const graph = {
     _nodes: [],
     links: {
@@ -397,7 +397,7 @@ test("Bus-Out ports connected directly to Media Loader support persistent renami
     showTextPrompt: () => Promise.resolve(null),
     showConfirm: () => Promise.resolve(false),
   });
-  vm.runInContext(source + "\\nglobalThis.mediaBusNamedTest = { outputRenameEntries, setLaneName, applyNames };", context);
+  vm.runInContext(source + "\nglobalThis.mediaBusNamedTest = { outputRenameEntries, setLaneName, applyNames };", context);
 
   let groups = {
     image: [asset("cover"), asset("character")],
