@@ -232,6 +232,61 @@ function laneRecords(pack) {
   });
 }
 
+function findLaneOwner(pack, laneId, seen = new Set()) {
+  if (!pack || !laneId || seen.has(pack)) return null;
+  seen.add(pack);
+
+  const entry = laneRecords(pack).find((item) => item.laneId === laneId);
+  if (entry) return { pack, entry };
+
+  const busInput = (pack.inputs || []).find((input) =>
+    input?.type === BUS_TYPE && input.link != null
+  );
+  if (!busInput) return null;
+
+  const upstream = resolveSource(pack.graph, busInput.link);
+  return upstream && isPack(upstream.node)
+    ? findLaneOwner(upstream.node, laneId, seen)
+    : null;
+}
+
+function outputRenameEntries(unpack) {
+  if (!isUnpack(unpack)) return [];
+  const pairedPack = findPackForUnpack(unpack);
+  if (!pairedPack) return [];
+
+  return (unpack.outputs || []).flatMap((output) => {
+    const laneId = String(output?.[LANE_FIELD] || "").trim();
+    if (!output || !laneId || output.type === BUS_TYPE) return [];
+    const owner = findLaneOwner(pairedPack, laneId);
+    if (!owner) return [];
+    const label = stripDecorations(output.label || output.name) || owner.entry.label;
+    return [{
+      output,
+      laneId,
+      pack: owner.pack,
+      entry: { ...owner.entry, label },
+    }];
+  });
+}
+
+function syncNodes2OutputLabels(unpack) {
+  if (typeof document === "undefined") return;
+  const root = [...document.querySelectorAll("[data-node-id]")]
+    .find((element) => String(element.getAttribute("data-node-id")) === String(unpack?.id));
+  if (!root) return;
+
+  const rows = [...root.querySelectorAll(".lg-slot--output")];
+  const entries = outputRenameEntries(unpack);
+  rows.forEach((row, index) => {
+    const entry = entries[index];
+    if (!entry) return;
+    row.classList.add("terry-wire-bus-renamable-output");
+    const span = row.querySelector(".text-node-component-slot-text");
+    if (span) span.textContent = `${entry.label}   ${PENCIL}`;
+  });
+}
+
 function syncNodes2InputLabels(pack) {
   if (typeof document === "undefined") return;
   const root = [...document.querySelectorAll("[data-node-id]")]
@@ -275,6 +330,8 @@ function syncPackLabels(pack) {
 function applyNames(pack) {
   if (!isPack(pack) || !pack.graph) return;
   const entries = namedEntries(pack);
+  const records = laneRecords(pack);
+
   for (const entry of entries) {
     entry.input.name = entry.label;
     entry.input.label = `${entry.label}   ${PENCIL}${entry.manualName ? "   ❌" : ""}`;
@@ -283,27 +340,41 @@ function applyNames(pack) {
     if (stored) stored.name = entry.label;
   }
 
-  for (const node of pack.graph?._nodes || []) {
+  for (const node of allNodes()) {
     if (!isUnpack(node)) continue;
-    if (findPackForUnpack(node) !== pack) continue;
-    for (const entry of entries) {
-      const output = (node.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
-      if (!output) continue;
-      output.name = entry.label;
-      output.label = entry.label;
+    for (const output of node.outputs || []) {
+      const laneId = String(output?.[LANE_FIELD] || "").trim();
+      if (!laneId || output.type === BUS_TYPE) continue;
+      const owner = findLaneOwner(findPackForUnpack(node), laneId);
+      if (owner?.pack !== pack) continue;
+
+      const connectedEntry = entries.find((item) => item.laneId === laneId);
+      const storedEntry = records.find((item) => item.laneId === laneId);
+      const displayName = connectedEntry?.label || (storedEntry?.named ? storedEntry.label : "");
+      if (!displayName) continue;
+
+      output.name = displayName;
+      output.label = `${displayName}   ${PENCIL}`;
     }
+    syncNodes2OutputLabels(node);
     node.setDirtyCanvas?.(true, true);
   }
+
   syncPackLabels(pack);
   pack.setDirtyCanvas?.(true, true);
 }
 
 function schedule(node) {
   setTimeout(() => {
-    if (isPack(node)) applyNames(node);
-    else if (isUnpack(node)) {
-      const pack = findPackForUnpack(node);
-      if (pack) applyNames(pack);
+    if (isPack(node)) {
+      applyNames(node);
+      return;
+    }
+    if (!isUnpack(node)) return;
+    const pack = findPackForUnpack(node);
+    if (pack) applyNames(pack);
+    for (const entry of outputRenameEntries(node)) {
+      if (entry.pack !== pack) applyNames(entry.pack);
     }
   }, 0);
 }
@@ -404,6 +475,18 @@ function inputLocalY(node, slot) {
   return (Number(globalThis.LiteGraph?.NODE_TITLE_HEIGHT) || 30) + height * (index + 0.5);
 }
 
+function outputLocalY(node, slot) {
+  const index = (node?.outputs || []).indexOf(slot);
+  if (index < 0) return null;
+  try {
+    const out = [0, 0];
+    const result = node.getConnectionPos?.(false, index, out) || out;
+    if (Array.isArray(result) && Number.isFinite(result[1])) return result[1] - Number(node.pos?.[1] || 0);
+  } catch {}
+  const height = Number(globalThis.LiteGraph?.NODE_SLOT_HEIGHT) || 20;
+  return (Number(globalThis.LiteGraph?.NODE_TITLE_HEIGHT) || 30) + height * (index + 0.5);
+}
+
 function localPos(node, event, pos) {
   if (Array.isArray(pos) && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) return pos;
   if (Number.isFinite(event?.canvasX) && Number.isFinite(event?.canvasY)) {
@@ -434,6 +517,22 @@ function tryRenameOrDelete(pack, event, pos) {
   return false;
 }
 
+function tryRenameOutput(unpack, event, pos) {
+  const point = localPos(unpack, event, pos);
+  if (!point) return false;
+  const width = Number(unpack.size?.[0]) || 180;
+  for (const entry of outputRenameEntries(unpack)) {
+    const y = outputLocalY(unpack, entry.output);
+    if (!Number.isFinite(y) || Math.abs(point[1] - y) > 9) continue;
+    if (point[0] < Math.max(8, width - 165) || point[0] > width - 20) continue;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    requestRename(entry.pack, entry.entry);
+    return true;
+  }
+  return false;
+}
+
 function installNamedLaneStyle() {
   if (typeof document === "undefined" || document.getElementById("terry-wire-bus-named-lane-style")) return;
   const style = document.createElement("style");
@@ -442,6 +541,9 @@ function installNamedLaneStyle() {
 .lg-slot--input.terry-wire-bus-named-lane{
   position:relative;
   padding-right:26px;
+}
+.lg-slot--output.terry-wire-bus-renamable-output{
+  cursor:text;
 }
 .lg-slot--input.terry-wire-bus-named-lane::after{
   content:"×";
@@ -491,23 +593,37 @@ function installNodes2RenameHandler() {
     const target = event.target;
     if (!target?.closest) return;
     if (target.closest('[data-testid="slot-connection-dot"], [data-testid="slot-dot"]')) return;
-    const row = target.closest(".lg-slot--input");
+    const inputRow = target.closest(".lg-slot--input");
+    const outputRow = target.closest(".lg-slot--output");
+    const row = inputRow || outputRow;
     const root = row?.closest?.("[data-node-id]");
     if (!row || !root) return;
     const span = row.querySelector(".text-node-component-slot-text");
     if (!String(span?.textContent || row.textContent || "").includes(PENCIL)) return;
-    const node = allNodes().find((item) => isPack(item) && String(item?.id) === String(root.getAttribute("data-node-id")));
+
+    const isOutputRow = Boolean(outputRow);
+    const node = allNodes().find((item) =>
+      (isOutputRow ? isUnpack(item) : isPack(item))
+      && String(item?.id) === String(root.getAttribute("data-node-id"))
+    );
     if (!node) return;
-    const rows = [...root.querySelectorAll(".lg-slot--input")]
+
+    const selector = isOutputRow ? ".lg-slot--output" : ".lg-slot--input";
+    const rows = [...root.querySelectorAll(selector)]
       .filter((item) => {
         const label = item.querySelector(".text-node-component-slot-text");
         return String(label?.textContent || item.textContent || "").includes(PENCIL);
       });
-    const entry = renameEntries(node)[rows.indexOf(row)];
+    const entries = isOutputRow ? outputRenameEntries(node) : renameEntries(node);
+    const entry = entries[rows.indexOf(row)];
     if (!entry) return;
 
     event.preventDefault?.();
     event.stopPropagation?.();
+    if (isOutputRow) {
+      requestRename(entry.pack, entry.entry);
+      return;
+    }
     const rect = row.getBoundingClientRect?.();
     if (entry.named && rect && Number.isFinite(event.clientX) && event.clientX >= rect.right - 28) {
       deleteNamedLane(node, entry);
@@ -536,6 +652,14 @@ function patchPackNodeType(nodeTypeClass, nodeData) {
   }
 }
 
+function patchUnpackNodeType(nodeTypeClass) {
+  const oldMouse = nodeTypeClass.prototype.onMouseDown;
+  nodeTypeClass.prototype.onMouseDown = function (event, pos) {
+    if (tryRenameOutput(this, event, pos)) return true;
+    return oldMouse?.apply(this, arguments);
+  };
+}
+
 app.registerExtension({
   name: "TerryXu.WireBusNamedPorts",
 
@@ -544,6 +668,7 @@ app.registerExtension({
     if (nodeData?.name === WIRELESS_PACK_TYPE) patchPackNodeType(nodeType, nodeData);
 
     if (nodeData?.name === WIRELESS_UNPACK_TYPE) {
+      patchUnpackNodeType(nodeType);
       const oldConnections = nodeType.prototype.onConnectionsChange;
       nodeType.prototype.onConnectionsChange = function () {
         const result = oldConnections?.apply(this, arguments);

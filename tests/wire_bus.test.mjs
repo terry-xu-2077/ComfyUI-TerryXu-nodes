@@ -155,3 +155,83 @@ test("switch and Bus-In lane names use the shared TerryXu dialog instead of brow
   assert.match(dialog, /showTextPrompt/);
   assert.match(dialog, /showConfirm/);
 });
+
+
+test("renaming a Bus-Out lane updates its owning Bus-In and every paired Bus-Out", async () => {
+  const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "");
+  const graph = {
+    _nodes: [],
+    links: {
+      1: { id: 1, origin_id: 1, origin_slot: 0, target_id: 2, target_slot: 0 },
+      2: { id: 2, origin_id: 2, origin_slot: 0, target_id: 3, target_slot: 0 },
+      3: { id: 3, origin_id: 2, origin_slot: 0, target_id: 4, target_slot: 0 },
+      4: { id: 4, origin_id: 4, origin_slot: 0, target_id: 5, target_slot: 0 },
+    },
+    getNodeById(id) { return this._nodes.find((node) => String(node.id) === String(id)); },
+    change() {},
+    setDirtyCanvas() {},
+  };
+  const app = {
+    graph,
+    ui: { settings: { getSettingValue: () => "zh-CN" } },
+    registerExtension() {},
+  };
+  const context = vm.createContext({
+    app,
+    navigator: { language: "zh-CN" },
+    showTextPrompt: () => Promise.resolve(null),
+    showConfirm: () => Promise.resolve(false),
+  });
+  vm.runInContext(source + "\nglobalThis.busNamedTest = { outputRenameEntries, setLaneName };", context);
+
+  const sourceNode = {
+    id: 1, type: "ModelSource",
+    outputs: [{ name: "MODEL", label: "MODEL", type: "MODEL", links: [1] }],
+  };
+  const pack = {
+    id: 2, type: "TerryXuWirelessBusPack", graph,
+    properties: {
+      terry_wire_bus_lanes: [{ id: "lane_model", name: "MODEL", type: "MODEL" }],
+      terry_wire_bus_named_lanes: {},
+    },
+    inputs: [{ name: "wire", label: "MODEL", type: "MODEL", link: 1, terry_lane_id: "lane_model" }],
+    outputs: [{ name: "bus", label: "bus", type: "TERRY_WIRE_BUS", links: [2, 3] }],
+    size: [180, 120],
+    setDirtyCanvas() {},
+  };
+  const directUnpack = {
+    id: 3, type: "TerryXuWirelessBusUnpack", graph,
+    inputs: [{ name: "bus", type: "TERRY_WIRE_BUS", link: 2 }],
+    outputs: [{ name: "MODEL", label: "MODEL", type: "MODEL", terry_lane_id: "lane_model", links: [] }],
+    setDirtyCanvas() {},
+  };
+  const bridgePack = {
+    id: 4, type: "TerryXuWirelessBusPack", graph,
+    properties: { terry_wire_bus_lanes: [{ id: "bridge_bus", name: "bus", type: "TERRY_WIRE_BUS" }] },
+    inputs: [{ name: "bus", label: "bus", type: "TERRY_WIRE_BUS", link: 3, terry_lane_id: "bridge_bus" }],
+    outputs: [{ name: "bus", label: "bus", type: "TERRY_WIRE_BUS", links: [4] }],
+    size: [180, 120],
+    setDirtyCanvas() {},
+  };
+  const bridgedUnpack = {
+    id: 5, type: "TerryXuWirelessBusUnpack", graph,
+    inputs: [{ name: "bus", type: "TERRY_WIRE_BUS", link: 4 }],
+    outputs: [{ name: "MODEL", label: "MODEL", type: "MODEL", terry_lane_id: "lane_model", links: [] }],
+    setDirtyCanvas() {},
+  };
+  graph._nodes.push(sourceNode, pack, directUnpack, bridgePack, bridgedUnpack);
+
+  const outputEntry = context.busNamedTest.outputRenameEntries(bridgedUnpack)[0];
+  assert.equal(outputEntry.pack, pack);
+  assert.equal(outputEntry.entry.laneId, "lane_model");
+
+  context.busNamedTest.setLaneName(pack, outputEntry.entry, "摄影机模型");
+
+  assert.equal(pack.properties.terry_wire_bus_named_lanes.lane_model, "摄影机模型");
+  assert.equal(pack.inputs[0].label.includes("摄影机模型"), true);
+  assert.equal(directUnpack.outputs[0].name, "摄影机模型");
+  assert.equal(bridgedUnpack.outputs[0].name, "摄影机模型");
+  assert.equal(directUnpack.outputs[0].label.includes("✎"), true);
+  assert.equal(bridgedUnpack.outputs[0].label.includes("✎"), true);
+});
