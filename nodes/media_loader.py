@@ -100,6 +100,10 @@ class MediaBusItem(io.ComfyNode):
     def execute(cls, bus, asset_id):
         asset = next((item for item in bus if item["id"] == asset_id), None)
         if asset is None:
+            if str(asset_id).startswith("__terry_bus_empty_"):
+                # A Bus-Out port can remain connected when its upstream Media
+                # Loader is replaced with one containing fewer assets.
+                return io.NodeOutput(ExecutionBlocker(None))
             raise ValueError("媒体已移除，请重新连接总线出口")
         if asset.get("empty"):
             return io.NodeOutput(ExecutionBlocker(None))
