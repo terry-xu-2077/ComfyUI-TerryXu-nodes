@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { isTerrySwitch, selectedSwitchInput, LINE_SWITCH_TYPE, BOOL_SWITCH_TYPE } from "../web/switch_bus_route.mjs";
-import { mediaLanes, mediaExecutionSource } from "../web/media_loader_model.mjs";
+import { mediaLanes, moveMedia, mediaExecutionSource } from "../web/media_loader_model.mjs";
 
 const BUS = "TERRY_WIRE_BUS";
 
@@ -375,4 +375,77 @@ test("Bus-Out keeps its manual width with a Media Loader source", async () => {
   assert.equal(busOut.size[0], 264);
   assert.ok(busOut.size[1] > firstHeight);
   assert.equal(busOut.widgets_start_y, busOut.size[1] - 70);
+});
+
+
+test("Bus-Out ports connected directly to Media Loader support persistent renaming", async () => {
+  const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\\r?\\n/gm, "");
+  const graph = {
+    _nodes: [],
+    links: {
+      1: { id: 1, origin_id: 1, origin_slot: 0, target_id: 2, target_slot: 0 },
+      2: { id: 2, origin_id: 1, origin_slot: 0, target_id: 3, target_slot: 0 },
+    },
+    getNodeById(id) { return this._nodes.find(node => String(node.id) === String(id)); },
+    change() {},
+    setDirtyCanvas() {},
+  };
+  const app = { graph, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} };
+  const context = vm.createContext({
+    app, navigator: { language: "zh-CN" },
+    showTextPrompt: () => Promise.resolve(null),
+    showConfirm: () => Promise.resolve(false),
+  });
+  vm.runInContext(source + "\\nglobalThis.mediaBusNamedTest = { outputRenameEntries, setLaneName, applyNames };", context);
+
+  let groups = {
+    image: [asset("cover"), asset("character")],
+    audio: [asset("voice", "audio")],
+    video: [],
+  };
+  const mediaLoader = {
+    id: 1, type: "TerryXuMediaLoader", graph,
+    properties: {},
+    outputs: [{ name: "bus", type: BUS, links: [1, 2] }],
+  };
+  mediaLoader.__terryBusLaneEntries = () =>
+    mediaLanes(mediaLoader, groups, mediaLoader.properties?.terry_wire_bus_named_lanes);
+  const unpack = {
+    id: 2, type: "TerryXuWirelessBusUnpack", graph,
+    inputs: [{ name: "bus", type: BUS, link: 1 }],
+    outputs: mediaLanes(mediaLoader, groups).map(lane => ({
+      name: lane.name, label: lane.name, type: lane.type, terry_lane_id: lane.laneId, links: [],
+    })),
+    setDirtyCanvas() {},
+  };
+  const secondUnpack = {
+    id: 3, type: "TerryXuWirelessBusUnpack", graph,
+    inputs: [{ name: "bus", type: BUS, link: 2 }],
+    outputs: mediaLanes(mediaLoader, groups).map(lane => ({
+      name: lane.name, label: lane.name, type: lane.type, terry_lane_id: lane.laneId, links: [],
+    })),
+    setDirtyCanvas() {},
+  };
+  graph._nodes.push(mediaLoader, unpack, secondUnpack);
+
+  const entry = context.mediaBusNamedTest.outputRenameEntries(unpack)
+    .find(item => item.laneId === "cover");
+  assert.equal(entry.pack, mediaLoader);
+  context.mediaBusNamedTest.setLaneName(entry.pack, entry.entry, "主视觉参考");
+
+  assert.equal(mediaLoader.properties.terry_wire_bus_named_lanes.cover, "主视觉参考");
+  assert.equal(unpack.outputs[0].name, "主视觉参考");
+  assert.equal(unpack.outputs[0].label, "主视觉参考");
+  assert.equal(secondUnpack.outputs[0].name, "主视觉参考");
+  assert.equal(secondUnpack.outputs[0].label, "主视觉参考");
+  assert.equal(mediaLoader.__terryBusLaneEntries().find(lane => lane.laneId === "cover").name, "主视觉参考");
+
+  groups = moveMedia(groups, "image", "character", "cover");
+  context.mediaBusNamedTest.applyNames(mediaLoader);
+  const reordered = mediaLoader.__terryBusLaneEntries();
+  assert.equal(reordered.find(lane => lane.laneId === "cover").name, "主视觉参考");
+  assert.equal(reordered.find(lane => lane.laneId === "character").name, "图片 1");
+  assert.equal(unpack.outputs.find(output => output.terry_lane_id === "cover").name, "主视觉参考");
+  assert.equal(secondUnpack.outputs.find(output => output.terry_lane_id === "cover").name, "主视觉参考");
 });

@@ -6,6 +6,7 @@ import { MEDIA_KINDS, MEDIA_LABELS, readMedia, mediaFile, moveMedia, emptyMediaS
 const NODE_ID = "TerryXuMediaLoader";
 const COLLAPSED_PROPERTY = "terry_media_collapsed";
 const EXPANDED_HEIGHT_PROPERTY = "terry_media_expanded_height";
+const NAMED_LANES_PROPERTY = "terry_wire_bus_named_lanes";
 let sectionId = 0;
 let directorModule;
 
@@ -361,7 +362,7 @@ function install(node) {
   const dom = node.addDOMWidget("media_cards", "terry_media_cards", root,
     { serialize: false, hideOnZoom: false, getMinHeight: () => Math.min(700, Math.max(120, contentHeight())), getMaxHeight: () => 1400 });
   dom.serialize = false;
-  node.__terryBusLaneEntries = () => mediaLanes(node, groups());
+  node.__terryBusLaneEntries = () => mediaLanes(node, groups(), node.properties?.[NAMED_LANES_PROPERTY]);
   node.__terryMediaLoader = { render, dispose() { disposed = true; picker?.close(); root.querySelectorAll("video,audio").forEach(media => media.pause()); } };
   const changed = storage.callback;
   storage.callback = function () {

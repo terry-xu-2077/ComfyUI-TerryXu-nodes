@@ -163,3 +163,29 @@ test("only referenced removals retain a serializable empty slot", () => {
     assert.equal(lane.laneId,"first");
   }
 });
+
+
+test("media lane names are stored by stable asset ID and survive reordering and empty slots", () => {
+  const node = { id: 12 };
+  const groups = {
+    image: [asset("cover"), asset("character")],
+    audio: [asset("voice", "audio")],
+    video: [],
+  };
+  const names = { cover: "主视觉参考", voice: "角色对白" };
+  const initial = mediaLanes(node, groups, names);
+  assert.deepEqual(initial.map(lane => [lane.laneId, lane.name]), [
+    ["cover", "主视觉参考"], ["character", "图片 2"], ["voice", "角色对白"],
+  ]);
+
+  const reordered = moveMedia(groups, "image", "character", "cover");
+  const afterReorder = mediaLanes(node, reordered, names);
+  assert.deepEqual(afterReorder.map(lane => [lane.laneId, lane.name]), [
+    ["character", "图片 1"], ["cover", "主视觉参考"], ["voice", "角色对白"],
+  ]);
+
+  const cleared = removeMedia(reordered, "image", "cover", true);
+  const afterClear = mediaLanes(node, cleared, names);
+  assert.equal(afterClear.find(lane => lane.laneId === "cover").empty, true);
+  assert.equal(afterClear.find(lane => lane.laneId === "cover").name, "主视觉参考");
+});

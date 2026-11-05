@@ -3,6 +3,7 @@ import { showTextPrompt, showConfirm } from "./terry_dialog.js";
 
 const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
 const WIRELESS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
+const MEDIA_LOADER_TYPE = "TerryXuMediaLoader";
 const BUS_TYPE = "TERRY_WIRE_BUS";
 const EMPTY_TYPE = "*";
 const LANE_FIELD = "terry_lane_id";
@@ -15,7 +16,9 @@ function nodeType(node) {
   return String(node?.comfyClass || node?.type || node?.constructor?.comfyClass || node?.constructor?.type || "");
 }
 
-function isPack(node) { return nodeType(node) === WIRELESS_PACK_TYPE; }
+function isWirelessPack(node) { return nodeType(node) === WIRELESS_PACK_TYPE; }
+function isMediaLoader(node) { return nodeType(node) === MEDIA_LOADER_TYPE; }
+function isPack(node) { return isWirelessPack(node) || isMediaLoader(node); }
 function isUnpack(node) { return nodeType(node) === WIRELESS_UNPACK_TYPE; }
 function isReroute(node) {
   const type = nodeType(node).toLowerCase();
@@ -123,6 +126,7 @@ function resolveSource(graph, linkId, seen = new Set()) {
     const pack = findPackForUnpack(source);
     const laneId = source.outputs?.[slot]?.[LANE_FIELD];
     const entry = pack?.__terryBusLaneEntries?.().find((item) => item?.laneId === laneId);
+    if (entry?.source) return entry.source;
     const input = entry?.input
       || (pack?.inputs || []).find((item) => item?.[LANE_FIELD] === laneId);
     return input?.link == null
@@ -168,12 +172,12 @@ function fallbackType(source, input) {
 function findPackForUnpack(unpack) {
   if (nodeType(unpack) === WIRELESS_UNPACK_TYPE) {
     const physical = resolveSource(unpack?.graph, unpack?.inputs?.[0]?.link);
-    if (physical && nodeType(physical.node) === WIRELESS_PACK_TYPE) return physical.node;
+    if (physical && isPack(physical.node)) return physical.node;
     const name = wirelessChannelName(unpack);
     if (!name) return null;
     for (const graph of [unpack.graph, app.graph]) {
       const pack = (graph?._nodes || []).find((node) =>
-        nodeType(node) === WIRELESS_PACK_TYPE && wirelessChannelName(node) === name
+        isWirelessPack(node) && wirelessChannelName(node) === name
       );
       if (pack) return pack;
     }
@@ -183,6 +187,15 @@ function findPackForUnpack(unpack) {
 }
 
 function namedEntries(pack) {
+  if (isMediaLoader(pack)) {
+    return laneRecords(pack).map((entry) => ({
+      laneId: entry.laneId,
+      base: entry.label,
+      manualName: entry.named ? entry.label : "",
+      label: entry.label,
+      mediaEntry: entry.mediaEntry,
+    }));
+  }
   const entries = [];
   const manualNames = manualLaneNames(pack);
   for (const input of pack?.inputs || []) {
@@ -209,6 +222,23 @@ function namedEntries(pack) {
 
 function laneRecords(pack) {
   const manualNames = manualLaneNames(pack);
+  if (isMediaLoader(pack)) {
+    return (pack.__terryBusLaneEntries?.() || []).flatMap((mediaEntry, index) => {
+      const laneId = String(mediaEntry?.laneId || mediaEntry?.lane?.id || "").trim();
+      if (!laneId) return [];
+      const manualName = String(manualNames[laneId] || "").trim();
+      const sourceName = stripDecorations(mediaEntry?.name || mediaEntry?.lane?.name || "");
+      return [{
+        input: null,
+        inputIndex: -1,
+        laneId,
+        ordinal: index + 1,
+        named: Boolean(manualName),
+        label: manualName || sourceName || `${labels().input} ${index + 1}`,
+        mediaEntry,
+      }];
+    });
+  }
   const stored = Array.isArray(pack?.properties?.[PACK_LANES_PROPERTY])
     ? pack.properties[PACK_LANES_PROPERTY]
     : [];
@@ -331,7 +361,7 @@ function syncNodes2InputLabels(pack) {
 }
 
 function syncPackLabels(pack) {
-  if (!isPack(pack)) return;
+  if (!isWirelessPack(pack)) return;
   const manualNames = manualLaneNames(pack);
   const stored = Array.isArray(pack.properties?.[PACK_LANES_PROPERTY])
     ? pack.properties[PACK_LANES_PROPERTY]
@@ -354,12 +384,14 @@ function applyNames(pack) {
   const entries = namedEntries(pack);
   const records = laneRecords(pack);
 
-  for (const entry of entries) {
-    entry.input.name = entry.label;
-    entry.input.label = entry.label;
-    const stored = (pack.properties?.[PACK_LANES_PROPERTY] || [])
-      .find((lane) => lane?.id === entry.laneId);
-    if (stored) stored.name = entry.label;
+  if (isWirelessPack(pack)) {
+    for (const entry of entries) {
+      entry.input.name = entry.label;
+      entry.input.label = entry.label;
+      const stored = (pack.properties?.[PACK_LANES_PROPERTY] || [])
+        .find((lane) => lane?.id === entry.laneId);
+      if (stored) stored.name = entry.label;
+    }
   }
 
   for (const node of allNodes()) {
@@ -402,7 +434,7 @@ function schedule(node) {
 }
 
 function renameEntries(pack) {
-  return laneRecords(pack);
+  return isWirelessPack(pack) ? laneRecords(pack) : [];
 }
 
 function requestRename(pack, entry) {
@@ -414,7 +446,10 @@ function requestRename(pack, entry) {
     confirmText: isChineseLocale() ? "保存" : "Save",
     cancelText: isChineseLocale() ? "取消" : "Cancel",
   }).then((next) => {
-    if (next == null || !(pack?.inputs || []).includes(entry.input)) return;
+    const stillExists = isMediaLoader(pack)
+      ? (pack.__terryBusLaneEntries?.() || []).some((lane) => String(lane?.laneId || lane?.lane?.id || "") === entry.laneId)
+      : (pack?.inputs || []).includes(entry.input);
+    if (next == null || !stillExists) return;
     setLaneName(pack, entry, next);
     syncNodes2InputLabels(pack);
   });
@@ -426,6 +461,13 @@ function setLaneName(pack, entry, value) {
   const names = manualLaneNames(pack);
   if (next) names[entry.laneId] = next;
   else delete names[entry.laneId];
+
+  if (isMediaLoader(pack)) {
+    applyNames(pack);
+    pack.graph?.change?.();
+    pack.graph?.setDirtyCanvas?.(true, true);
+    return;
+  }
 
   const stored = (pack.properties?.[PACK_LANES_PROPERTY] || [])
     .find((lane) => lane?.id === entry.laneId);
