@@ -239,6 +239,47 @@ test("renaming a Bus-Out lane updates its owning Bus-In and every paired Bus-Out
   assert.equal(pack.inputs[0].label.includes("摄影机模型"), true);
   assert.equal(directUnpack.outputs[0].name, "摄影机模型");
   assert.equal(bridgedUnpack.outputs[0].name, "摄影机模型");
-  assert.equal(directUnpack.outputs[0].label.includes("✎"), true);
-  assert.equal(bridgedUnpack.outputs[0].label.includes("✎"), true);
+  assert.equal(directUnpack.outputs[0].label.includes("✎"), false);
+  assert.equal(bridgedUnpack.outputs[0].label.includes("✎"), false);
+});
+
+
+test("wireless bus nodes keep a user-adjusted width while preserving automatic height", async () => {
+  const source = (await readFile(new URL("../web/wire_bus_visual.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "");
+  const context = vm.createContext({
+    app: { registerExtension() {} },
+    requestAnimationFrame() {},
+  });
+  vm.runInContext(source + "\nglobalThis.patchBusNode = patchBusNode;", context);
+
+  const node = {
+    type: "TerryXuWirelessBusPack",
+    size: [112, 180],
+    properties: {},
+    __terryBusExpandedSize: [112, 180],
+    onResize() {},
+  };
+  context.patchBusNode(node);
+  node.size = [280, 260];
+  node.onResize();
+
+  assert.equal(node.size[0], 280);
+  assert.equal(node.size[1], 180);
+  assert.equal(node.properties.terry_wire_bus_width, 280);
+  assert.equal(node.__terryBusCompactWidth, 280);
+});
+
+test("Bus-In and Bus-Out edit icons are shown only while hovering a port label", async () => {
+  const [bus, visual, namedPorts] = await Promise.all([
+    readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"),
+    readFile(new URL("../web/wire_bus_visual.js", import.meta.url), "utf8"),
+    readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(bus, /this\.resizable = true;/);
+  assert.match(bus, /terry_wire_bus_width/);
+  assert.match(visual, /width:\$\{compactWidth\}px !important/);
+  assert.match(namedPorts, /\.text-node-component-slot-text:hover::after/);
+  assert.match(namedPorts, /:has\(\.text-node-component-slot-text:hover\)::after/);
+  assert.doesNotMatch(namedPorts, /label = `\$\{entry\.label\}   \$\{PENCIL\}/);
 });

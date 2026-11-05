@@ -15,6 +15,7 @@ const UNPACK_LANES_PROPERTY = "terry_wire_bus_lane_ids";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
 const UNPACK_OUTPUT_MODE_PROPERTY = "terry_wire_bus_expand_outputs";
 const UNPACK_SAVED_LINKS_PROPERTY = "terry_wire_bus_saved_output_links";
+const BUS_WIDTH_PROPERTY = "terry_wire_bus_width";
 
 const LANE_FIELD = "terry_lane_id";
 const BUS_OUTPUT_FIELD = "terry_bus_passthrough_output";
@@ -1223,7 +1224,11 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   const currentHeight = Number(node.size?.[1]) || preferredHeight;
   const previousPreferredHeight = Number(node.__terryBusPreferredHeight) || preferredHeight;
   const customHeight = initialized && Math.abs(currentHeight - previousPreferredHeight) > 0.5;
-  const width = initialized ? Math.max(COMPACT_NODE_WIDTH, currentWidth) : COMPACT_NODE_WIDTH;
+  const storedWidth = Number(node.properties?.[BUS_WIDTH_PROPERTY]) || 0;
+  const width = Math.max(
+    COMPACT_NODE_WIDTH,
+    storedWidth || (initialized ? currentWidth : COMPACT_NODE_WIDTH)
+  );
 
   const inheritsPairedHeight = !busOnly && (
     (isUnpack(node) && isWirelessPack(pairedPack))
@@ -1242,7 +1247,9 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
         ? preferredHeight
         : (pairedHeight || (customHeight ? Math.max(minHeight, currentHeight) : preferredHeight)));
 
-  node.__terryBusCompactWidth = COMPACT_NODE_WIDTH;
+  node.__terryBusCompactWidth = width;
+  if (!node.properties || typeof node.properties !== "object") node.properties = {};
+  node.properties[BUS_WIDTH_PROPERTY] = width;
   node.__terryBusMinHeight = minHeight;
   node.__terryBusPreferredHeight = pairedHeight || preferredHeight;
   node.__terryBusLayoutInitialized = true;
@@ -1904,7 +1911,14 @@ app.registerExtension({
       const laneCount = isPackDef
         ? Math.max(0, Number(this.inputs?.length || 0) - 1)
         : Number(this.outputs?.length || 0);
-      size[0] = COMPACT_NODE_WIDTH;
+      size[0] = Math.max(
+        COMPACT_NODE_WIDTH,
+        Number(this.properties?.[BUS_WIDTH_PROPERTY]) || (
+          this.__terryBusLayoutInitialized
+            ? Number(this.size?.[0]) || COMPACT_NODE_WIDTH
+            : COMPACT_NODE_WIDTH
+        )
+      );
       size[1] = Math.max(Number(size[1]) || 0, compactBusNodeMinimumHeight(this, laneCount));
       return size;
     };
@@ -1914,7 +1928,7 @@ app.registerExtension({
       const result = originalCreated?.apply(this, arguments);
       this.isVirtualNode = true;
       this.serialize_widgets = isWirelessDef;
-      this.resizable = false;
+      this.resizable = true;
 
       if (isWirelessDef) initializeWirelessWidget(this);
       if (!isPackDef) initializeUnpackOutputModeControl(this);
@@ -2061,7 +2075,7 @@ app.registerExtension({
     const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function () {
       const result = originalConfigure?.apply(this, arguments);
-      this.resizable = false;
+      this.resizable = true;
 
       if (isWirelessDef) {
         initializeWirelessWidget(this);

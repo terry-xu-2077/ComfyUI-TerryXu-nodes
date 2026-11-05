@@ -524,39 +524,42 @@ function refreshVuePortStyle() {
         );
       }
     }
-    const compactWidth = Math.max(80, Number(node?.__terryBusCompactWidth) || 112);
+    const compactWidth = Math.max(112, Number(node?.__terryBusCompactWidth) || Number(node?.size?.[0]) || 112);
     const minBodyHeight = Math.max(0, Number(node?.__terryBusMinHeight) || Number(node?.size?.[1]) || 0);
     const bodyHeight = Math.max(minBodyHeight, Number(node?.size?.[1]) || 0);
     const nodeHeight = bodyHeight + nodeTitleHeight();
 
     nodeLayoutRules.push(`
 ${expandedRoot}{
-  --min-node-width:${compactWidth}px !important;
+  --min-node-width:112px !important;
   --node-width:${compactWidth}px !important;
   --node-height:${nodeHeight}px !important;
-  min-width:${compactWidth}px !important;
+  width:${compactWidth}px !important;
+  min-width:112px !important;
+  max-width:none !important;
   height:${nodeHeight}px !important;
   min-height:${nodeHeight}px !important;
   max-height:${nodeHeight}px !important;
 }
 ${expandedRoot} [data-testid="node-inner-wrapper"]{
   width:${compactWidth}px !important;
-  min-width:${compactWidth}px !important;
+  min-width:112px !important;
+  max-width:none !important;
   height:${nodeHeight}px !important;
   min-height:${nodeHeight}px !important;
   max-height:${nodeHeight}px !important;
 }
 ${root}[data-collapsed]{
-  --min-node-width:${compactWidth}px !important;
+  --min-node-width:112px !important;
   --node-width:${compactWidth}px !important;
   width:${compactWidth}px !important;
-  min-width:${compactWidth}px !important;
-  max-width:${compactWidth}px !important;
+  min-width:112px !important;
+  max-width:none !important;
 }
 ${root}[data-collapsed] [data-testid="node-inner-wrapper"]{
   width:${compactWidth}px !important;
-  min-width:${compactWidth}px !important;
-  max-width:${compactWidth}px !important;
+  min-width:112px !important;
+  max-width:none !important;
 }
 `);
 
@@ -848,6 +851,18 @@ function patchBusNode(node) {
   const originalResize = node.onResize;
   node.onResize = function () {
     const result = originalResize?.apply?.(this, arguments);
+    if (isWirelessBusNode(this)) {
+      const width = Math.max(112, Number(this.size?.[0]) || 112);
+      const expandedHeight = Number(this.__terryBusExpandedSize?.[1]) || Number(this.size?.[1]) || 0;
+      if (Array.isArray(this.size)) {
+        this.size[0] = width;
+        if (!this.flags?.collapsed && expandedHeight > 0) this.size[1] = expandedHeight;
+      }
+      this.__terryBusCompactWidth = width;
+      if (!this.properties || typeof this.properties !== "object") this.properties = {};
+      this.properties.terry_wire_bus_width = width;
+      this.__terryBusExpandedSize = [width, expandedHeight];
+    }
     queueVueStyleRefresh();
     return result;
   };

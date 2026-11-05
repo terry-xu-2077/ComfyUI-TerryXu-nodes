@@ -275,7 +275,7 @@ function outputRenameEntries(unpack) {
   const pairedPack = findPackForUnpack(unpack);
   if (!pairedPack) return [];
 
-  return (unpack.outputs || []).flatMap((output) => {
+  return (unpack.outputs || []).flatMap((output, outputIndex) => {
     const laneId = String(output?.[LANE_FIELD] || "").trim();
     if (!output || !laneId || output.type === BUS_TYPE) return [];
     const owner = findLaneOwner(pairedPack, laneId);
@@ -283,6 +283,7 @@ function outputRenameEntries(unpack) {
     const label = stripDecorations(output.label || output.name) || owner.entry.label;
     return [{
       output,
+      outputIndex,
       laneId,
       pack: owner.pack,
       entry: { ...owner.entry, label },
@@ -298,13 +299,14 @@ function syncNodes2OutputLabels(unpack) {
 
   const rows = [...root.querySelectorAll(".lg-slot--output")];
   const entries = outputRenameEntries(unpack);
-  rows.forEach((row, index) => {
-    const entry = entries[index];
-    if (!entry) return;
+  rows.forEach((row) => row.classList.remove("terry-wire-bus-renamable-output"));
+  for (const entry of entries) {
+    const row = rows[entry.outputIndex];
+    if (!row) continue;
     row.classList.add("terry-wire-bus-renamable-output");
     const span = row.querySelector(".text-node-component-slot-text");
-    if (span) span.textContent = `${entry.label}   ${PENCIL}`;
-  });
+    if (span) span.textContent = entry.entry.label;
+  }
 }
 
 function syncNodes2InputLabels(pack) {
@@ -313,19 +315,19 @@ function syncNodes2InputLabels(pack) {
     .find((element) => String(element.getAttribute("data-node-id")) === String(pack?.id));
   if (!root) return;
 
-  const rows = [...root.querySelectorAll(".lg-slot--input")]
-    .filter((row) => {
-      const span = row.querySelector(".text-node-component-slot-text");
-      return String(span?.textContent || row.textContent || "").includes(PENCIL);
-    });
+  const rows = [...root.querySelectorAll(".lg-slot--input")];
   const entries = laneRecords(pack);
-  rows.forEach((row, index) => {
-    const entry = entries[index];
-    if (!entry) return;
+  rows.forEach((row) => {
+    row.classList.remove("terry-wire-bus-renamable-input", "terry-wire-bus-named-lane");
+  });
+  for (const entry of entries) {
+    const row = rows[entry.inputIndex];
+    if (!row) continue;
+    row.classList.add("terry-wire-bus-renamable-input");
     row.classList.toggle("terry-wire-bus-named-lane", entry.named);
     const span = row.querySelector(".text-node-component-slot-text");
-    if (span) span.textContent = `${entry.label}   ${PENCIL}`;
-  });
+    if (span) span.textContent = entry.label;
+  }
 }
 
 function syncPackLabels(pack) {
@@ -342,7 +344,7 @@ function syncPackLabels(pack) {
     const manualName = String(manualNames[laneId] || "").trim();
     const storedName = String(stored.find((lane) => lane?.id === laneId)?.name || "").trim();
     const displayName = manualName || stripDecorations(current) || storedName || labels().input;
-    input.label = `${emptyPrefix}${displayName}   ${PENCIL}${manualName ? "   ❌" : ""}`;
+    input.label = `${emptyPrefix}${displayName}`;
   }
   syncNodes2InputLabels(pack);
 }
@@ -354,7 +356,7 @@ function applyNames(pack) {
 
   for (const entry of entries) {
     entry.input.name = entry.label;
-    entry.input.label = `${entry.label}   ${PENCIL}${entry.manualName ? "   ❌" : ""}`;
+    entry.input.label = entry.label;
     const stored = (pack.properties?.[PACK_LANES_PROPERTY] || [])
       .find((lane) => lane?.id === entry.laneId);
     if (stored) stored.name = entry.label;
@@ -374,7 +376,7 @@ function applyNames(pack) {
       if (!displayName) continue;
 
       output.name = displayName;
-      output.label = `${displayName}   ${PENCIL}`;
+      output.label = displayName;
     }
     syncNodes2OutputLabels(node);
     node.setDirtyCanvas?.(true, true);
@@ -525,7 +527,7 @@ function tryRenameOrDelete(pack, event, pos) {
   for (const entry of renameEntries(pack)) {
     const y = inputLocalY(pack, entry.input);
     if (!Number.isFinite(y) || Math.abs(point[1] - y) > 9) continue;
-    if (point[0] < 42 || point[0] > Math.min(width - 8, 150)) continue;
+    if (point[0] < 42 || point[0] > width - 8) continue;
     event?.preventDefault?.();
     event?.stopPropagation?.();
     if (entry.named && point[0] >= width - 30) {
@@ -558,12 +560,29 @@ function installNamedLaneStyle() {
   const style = document.createElement("style");
   style.id = "terry-wire-bus-named-lane-style";
   style.textContent = `
-.lg-slot--input.terry-wire-bus-named-lane{
+.lg-slot--input.terry-wire-bus-renamable-input{
   position:relative;
+}
+.lg-slot--input.terry-wire-bus-named-lane{
   padding-right:26px;
 }
-.lg-slot--output.terry-wire-bus-renamable-output{
+.lg-slot--input.terry-wire-bus-renamable-input .text-node-component-slot-text,
+.lg-slot--output.terry-wire-bus-renamable-output .text-node-component-slot-text{
   cursor:text;
+}
+.lg-slot--input.terry-wire-bus-renamable-input .text-node-component-slot-text::after,
+.lg-slot--output.terry-wire-bus-renamable-output .text-node-component-slot-text::after{
+  content:"${PENCIL}";
+  display:inline-block;
+  margin-left:9px;
+  color:rgba(220,224,230,.78);
+  opacity:0;
+  transition:opacity .12s ease;
+  pointer-events:none;
+}
+.lg-slot--input.terry-wire-bus-renamable-input .text-node-component-slot-text:hover::after,
+.lg-slot--output.terry-wire-bus-renamable-output .text-node-component-slot-text:hover::after{
+  opacity:1;
 }
 .lg-slot--input.terry-wire-bus-named-lane::after{
   content:"×";
@@ -575,7 +594,13 @@ function installNamedLaneStyle() {
   font-size:17px;
   font-weight:600;
   line-height:1;
+  opacity:0;
+  transition:opacity .12s ease;
   pointer-events:none;
+}
+.lg-slot--input.terry-wire-bus-named-lane:has(.text-node-component-slot-text:hover)::after,
+.lg-slot--input.terry-wire-bus-named-lane:hover::after{
+  opacity:1;
 }
 `;
   document.head.append(style);
@@ -619,7 +644,7 @@ function installNodes2RenameHandler() {
     const root = row?.closest?.("[data-node-id]");
     if (!row || !root) return;
     const span = row.querySelector(".text-node-component-slot-text");
-    if (!String(span?.textContent || row.textContent || "").includes(PENCIL)) return;
+    if (!span) return;
 
     const isOutputRow = Boolean(outputRow);
     const node = allNodes().find((item) =>
@@ -628,14 +653,22 @@ function installNodes2RenameHandler() {
     );
     if (!node) return;
 
+    const rowRect = row.getBoundingClientRect?.();
+    const isDeleteClick = !isOutputRow
+      && row.classList.contains("terry-wire-bus-named-lane")
+      && rowRect
+      && Number.isFinite(event.clientX)
+      && event.clientX >= rowRect.right - 28;
+    const isLabelClick = target === span || span.contains(target);
+    if (!isLabelClick && !isDeleteClick) return;
+
     const selector = isOutputRow ? ".lg-slot--output" : ".lg-slot--input";
-    const rows = [...root.querySelectorAll(selector)]
-      .filter((item) => {
-        const label = item.querySelector(".text-node-component-slot-text");
-        return String(label?.textContent || item.textContent || "").includes(PENCIL);
-      });
+    const rows = [...root.querySelectorAll(selector)];
+    const rowIndex = rows.indexOf(row);
     const entries = isOutputRow ? outputRenameEntries(node) : renameEntries(node);
-    const entry = entries[rows.indexOf(row)];
+    const entry = isOutputRow
+      ? entries.find((item) => item.outputIndex === rowIndex)
+      : entries.find((item) => item.inputIndex === rowIndex);
     if (!entry) return;
 
     event.preventDefault?.();
@@ -644,8 +677,7 @@ function installNodes2RenameHandler() {
       requestRename(entry.pack, entry.entry);
       return;
     }
-    const rect = row.getBoundingClientRect?.();
-    if (entry.named && rect && Number.isFinite(event.clientX) && event.clientX >= rect.right - 28) {
+    if (isDeleteClick) {
       deleteNamedLane(node, entry);
       return;
     }
