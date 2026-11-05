@@ -135,3 +135,23 @@ test("unnamed empty Bus-In lanes remain eligible for automatic cleanup", async (
   context.busTest.refreshPackSlots(pack);
   assert.equal(pack.inputs.some((input) => input.terry_lane_id === "lane_auto"), false);
 });
+
+
+test("switch and Bus-In lane names use the shared TerryXu dialog instead of browser-native prompts", async () => {
+  const [switchUi, busUi, dialog] = await Promise.all([
+    readFile(new URL("../web/switch_ui.js", import.meta.url), "utf8"),
+    readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"),
+    readFile(new URL("../web/terry_dialog.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(switchUi, /from "\.\/terry_dialog\.js"/);
+  assert.match(busUi, /from "\.\/terry_dialog\.js"/);
+  assert.match(switchUi, /showTextPrompt\(/);
+  assert.match(busUi, /showTextPrompt\(/);
+  assert.match(busUi, /showConfirm\(/);
+  assert.doesNotMatch(switchUi, /globalThis\.prompt|window\.prompt/);
+  assert.doesNotMatch(busUi, /globalThis\.prompt|window\.prompt|globalThis\.confirm|window\.confirm/);
+  assert.match(dialog, /aria-modal/);
+  assert.match(dialog, /terryxu-dialog-backdrop/);
+  assert.match(dialog, /showTextPrompt/);
+  assert.match(dialog, /showConfirm/);
+});

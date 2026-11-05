@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { showTextPrompt } from "./terry_dialog.js";
 
 const LINE_TYPE = "TerryXuLineSwitch";
 const BOOL_TYPE = "TerryXuBoolSwitch";
@@ -243,6 +244,25 @@ function renameEntries(node) {
   }
   return [];
 }
+function requestRename(node, entry) {
+  void showTextPrompt({
+    title: labels().rename,
+    value: entry.label,
+    inputLabel: labels().rename,
+    placeholder: isZh() ? "输入名称" : "Enter a name",
+    confirmText: isZh() ? "保存" : "Save",
+    cancelText: isZh() ? "取消" : "Cancel",
+  }).then((next) => {
+    if (next == null || !(node?.inputs || []).includes(entry.slot)) return;
+    entry.set(next);
+    if (isLine(node)) syncLine(node); else syncBool(node);
+    syncNodes2InputLabels(node);
+    syncRemotes();
+    node.graph?.setDirtyCanvas?.(true, true);
+    node.graph?.change?.();
+  });
+}
+
 function tryRename(node, event, pos) {
   const p = localPos(node, event, pos);
   if (!p) return false;
@@ -253,12 +273,7 @@ function tryRename(node, event, pos) {
     // so clicking the socket itself still starts a connection.
     if (p[0] < 42 || p[0] > Math.min(Number(node.size?.[0] || 180) - 8, 150)) continue;
     event?.preventDefault?.(); event?.stopPropagation?.();
-    const next = globalThis.prompt?.(labels().rename, entry.label);
-    if (next == null) return true;
-    entry.set(next);
-    if (isLine(node)) syncLine(node); else syncBool(node);
-    syncRemotes();
-    node.graph?.setDirtyCanvas?.(true, true);
+    requestRename(node, entry);
     return true;
   }
   return false;
@@ -300,14 +315,7 @@ function installNodes2RenameHandler() {
     if (!entry) return;
     event.preventDefault?.();
     event.stopPropagation?.();
-    const next = globalThis.prompt?.(labels().rename, entry.label);
-    if (next == null) return;
-    entry.set(next);
-    if (isLine(node)) syncLine(node); else syncBool(node);
-    syncNodes2InputLabels(node);
-    syncRemotes();
-    node.graph?.setDirtyCanvas?.(true, true);
-    node.graph?.change?.();
+    requestRename(node, entry);
   }, true);
 }
 

@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { showTextPrompt, showConfirm } from "./terry_dialog.js";
 
 const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
 const WIRELESS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
@@ -311,6 +312,21 @@ function renameEntries(pack) {
   return laneRecords(pack);
 }
 
+function requestRename(pack, entry) {
+  void showTextPrompt({
+    title: labels().rename,
+    value: entry.label,
+    inputLabel: labels().rename,
+    placeholder: isChineseLocale() ? "输入线束名称" : "Enter a lane name",
+    confirmText: isChineseLocale() ? "保存" : "Save",
+    cancelText: isChineseLocale() ? "取消" : "Cancel",
+  }).then((next) => {
+    if (next == null || !(pack?.inputs || []).includes(entry.input)) return;
+    setLaneName(pack, entry, next);
+    syncNodes2InputLabels(pack);
+  });
+}
+
 function setLaneName(pack, entry, value) {
   if (!pack || !entry) return;
   const next = String(value ?? "").trim();
@@ -348,25 +364,31 @@ function setLaneName(pack, entry, value) {
 
 function deleteNamedLane(pack, entry) {
   if (!pack || !entry?.named) return false;
-  const confirmAction = globalThis.confirm;
-  if (typeof confirmAction !== "function" || !confirmAction(labels().confirmDelete(entry.label))) return true;
+  void showConfirm({
+    title: isChineseLocale() ? "删除线束" : "Delete lane",
+    message: labels().confirmDelete(entry.label),
+    confirmText: isChineseLocale() ? "删除" : "Delete",
+    cancelText: isChineseLocale() ? "取消" : "Cancel",
+    danger: true,
+  }).then((confirmed) => {
+    if (!confirmed) return;
+    const inputIndex = (pack.inputs || []).indexOf(entry.input);
+    if (inputIndex < 0) return;
+    const names = manualLaneNames(pack);
+    delete names[entry.laneId];
+    const stored = Array.isArray(pack.properties?.[PACK_LANES_PROPERTY])
+      ? pack.properties[PACK_LANES_PROPERTY]
+      : [];
+    nodeProperties(pack)[PACK_LANES_PROPERTY] = stored.filter((lane) => lane?.id !== entry.laneId);
 
-  const inputIndex = (pack.inputs || []).indexOf(entry.input);
-  if (inputIndex < 0) return true;
-  const names = manualLaneNames(pack);
-  delete names[entry.laneId];
-  const stored = Array.isArray(pack.properties?.[PACK_LANES_PROPERTY])
-    ? pack.properties[PACK_LANES_PROPERTY]
-    : [];
-  nodeProperties(pack)[PACK_LANES_PROPERTY] = stored.filter((lane) => lane?.id !== entry.laneId);
-
-  pack.removeInput?.(inputIndex);
-  try {
-    pack.onConnectionsChange?.(globalThis.LiteGraph?.INPUT ?? 1, inputIndex, false, null, entry.input);
-  } catch {}
-  pack.graph?.change?.();
-  pack.graph?.setDirtyCanvas?.(true, true);
-  schedule(pack);
+    pack.removeInput?.(inputIndex);
+    try {
+      pack.onConnectionsChange?.(globalThis.LiteGraph?.INPUT ?? 1, inputIndex, false, null, entry.input);
+    } catch {}
+    pack.graph?.change?.();
+    pack.graph?.setDirtyCanvas?.(true, true);
+    schedule(pack);
+  });
   return true;
 }
 
@@ -406,9 +428,7 @@ function tryRenameOrDelete(pack, event, pos) {
     if (entry.named && point[0] >= width - 30) {
       return deleteNamedLane(pack, entry);
     }
-    const next = globalThis.prompt?.(labels().rename, entry.label);
-    if (next == null) return true;
-    setLaneName(pack, entry, next);
+    requestRename(pack, entry);
     return true;
   }
   return false;
@@ -493,10 +513,7 @@ function installNodes2RenameHandler() {
       deleteNamedLane(node, entry);
       return;
     }
-    const next = globalThis.prompt?.(labels().rename, entry.label);
-    if (next == null) return;
-    setLaneName(node, entry, next);
-    syncNodes2InputLabels(node);
+    requestRename(node, entry);
   }, true);
 }
 
