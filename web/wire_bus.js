@@ -551,7 +551,7 @@ function installOutputModeStyle() {
   const style = document.createElement("style");
   style.id = OUTPUT_MODE_STYLE_ID;
   style.textContent = `
-.terry-bus-advanced-inputs{display:flex;flex-direction:column;gap:${ADVANCED_INPUTS_GAP}px;width:100%;box-sizing:border-box;color:rgba(238,238,238,.9);font:11px/1.2 Inter,system-ui,sans-serif}
+.terry-bus-advanced-inputs{display:grid;grid-auto-rows:${ADVANCED_INPUTS_ROW_HEIGHT}px;align-content:start;justify-content:stretch;row-gap:${ADVANCED_INPUTS_GAP}px;width:100%;box-sizing:border-box;color:rgba(238,238,238,.9);font:11px/1.2 Inter,system-ui,sans-serif}
 .terry-bus-advanced-row{
   display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:${ADVANCED_INPUTS_ROW_HEIGHT}px;min-height:${ADVANCED_INPUTS_ROW_HEIGHT}px;
   box-sizing:border-box;padding:0 6px;color:rgba(238,238,238,.88);font:11px/1.2 Inter,system-ui,sans-serif;
@@ -616,6 +616,21 @@ function initializeAdvancedInputsControl(node) {
 
   const root = document.createElement("div");
   root.className = "terry-bus-advanced-inputs";
+  const contentHeight = advancedInputsContentHeight(node);
+  root.style.display = "grid";
+  root.style.gridTemplateRows = isUnpack(node)
+    ? `${ADVANCED_INPUTS_ROW_HEIGHT}px ${OUTPUT_MODE_CONTROL_HEIGHT}px`
+    : `${ADVANCED_INPUTS_ROW_HEIGHT}px`;
+  root.style.gridAutoRows = "auto";
+  root.style.alignContent = "start";
+  root.style.justifyContent = "stretch";
+  root.style.rowGap = `${ADVANCED_INPUTS_GAP}px`;
+  // WidgetDOM stretches its child to fill the available grid row. Keep this
+  // control group at its measured content height so the two rows stay adjacent.
+  root.style.flex = `0 0 ${contentHeight}px`;
+  root.style.height = `${contentHeight}px`;
+  root.style.minHeight = `${contentHeight}px`;
+  root.style.maxHeight = `${contentHeight}px`;
 
   const portConfigRow = document.createElement("div");
   portConfigRow.className = "terry-bus-advanced-row";
@@ -682,7 +697,6 @@ function initializeAdvancedInputsControl(node) {
   // widget flag also gates the canvas surface on frontends that support it.
   widget.advanced = true;
   widget.serialize = false;
-  widget.computeSize = (width) => [width, advancedInputsContentHeight(node)];
   node.__terryBusAdvancedControl = {
     widget, root, portConfigRow, portConfigLabel, portConfigSlot, outputMode,
   };
