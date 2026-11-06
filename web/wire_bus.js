@@ -41,6 +41,10 @@ const OUTPUT_MODE_STYLE_ID = "terry-wire-bus-output-mode-style";
 const ADVANCED_INPUTS_ROW_HEIGHT = 30;
 const ADVANCED_INPUTS_GAP = 4;
 const ADVANCED_INPUTS_MARGIN = 4;
+// ComfyUI Vue NodeFooter uses a 44px button with a 20px negative top margin;
+// the node body also keeps 12px bottom padding. Reserve that net 36px so
+// advanced controls never render underneath or beyond the native footer.
+const VUE_NODE_ADVANCED_FOOTER_RESERVE = 36;
 const BUS_ONLY_WIRELESS_HEIGHT = 140;
 
 const H3_TYPES = new Set(["TerryXuH3PromptEditor"]);
@@ -1276,13 +1280,16 @@ function compactBusNodeHeight(laneCount) {
   );
 }
 
-function advancedInputsVisible(node) {
-  if (node?.showAdvanced === true) return true;
+function alwaysShowAdvancedWidgets() {
   try {
     return app?.ui?.settings?.getSettingValue?.("Comfy.Node.AlwaysShowAdvancedWidgets") === true;
   } catch {
     return false;
   }
+}
+
+function advancedInputsVisible(node) {
+  return node?.showAdvanced === true || alwaysShowAdvancedWidgets();
 }
 
 function controlBlockHeight(node) {
@@ -1293,10 +1300,19 @@ function controlBlockHeight(node) {
   return 40 + advancedHeight;
 }
 
+function nativeAdvancedFooterReserveHeight(node) {
+  if (!isWireless(node) || globalThis.LiteGraph?.vueNodesMode !== true) return 0;
+  return alwaysShowAdvancedWidgets() ? 0 : VUE_NODE_ADVANCED_FOOTER_RESERVE;
+}
+
+function nodeControlAreaHeight(node) {
+  return controlBlockHeight(node) + nativeAdvancedFooterReserveHeight(node);
+}
+
 function busOnlyWirelessHeight(node) {
   return Math.max(
     BUS_ONLY_WIRELESS_HEIGHT,
-    COMPACT_NODE_HEADER_HEIGHT + controlBlockHeight(node) + 20
+    COMPACT_NODE_HEADER_HEIGHT + nodeControlAreaHeight(node) + 20
   );
 }
 
@@ -1306,7 +1322,7 @@ function compactBusNodeMinimumHeight(node, laneCount) {
   }
   const slotHeight = Math.max(16, Number(globalThis.LiteGraph?.NODE_SLOT_HEIGHT) || 20);
   const visibleSlots = Math.max(1, Number(laneCount) || 0) + (isPack(node) ? 1 : 0);
-  return COMPACT_NODE_SLOT_PADDING + visibleSlots * slotHeight + controlBlockHeight(node);
+  return COMPACT_NODE_SLOT_PADDING + visibleSlots * slotHeight + nodeControlAreaHeight(node);
 }
 
 function stableExpandedHeight(node, fallback = 0) {
@@ -1334,7 +1350,7 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
     ? fixedBusOnlyHeight
     : Math.max(
         minHeight,
-        compactBusNodeHeight(laneCount) + controlBlockHeight(node)
+        compactBusNodeHeight(laneCount) + nodeControlAreaHeight(node)
       );
 
   const initialized = node.__terryBusLayoutInitialized === true;
@@ -1356,7 +1372,7 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   if (inheritsPairedHeight) {
     pairedHeight = stableExpandedHeight(pairedPack);
     if (pairedHeight > 0 && isUnpack(node)) {
-      pairedHeight += controlBlockHeight(node) - controlBlockHeight(pairedPack);
+      pairedHeight += nodeControlAreaHeight(node) - nodeControlAreaHeight(pairedPack);
     }
     if (pairedHeight > 0) pairedHeight = Math.max(minHeight, pairedHeight);
   }
@@ -1374,7 +1390,7 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   node.__terryBusPreferredHeight = pairedHeight || preferredHeight;
   node.__terryBusLayoutInitialized = true;
 
-  const blockHeight = controlBlockHeight(node);
+  const blockHeight = nodeControlAreaHeight(node);
   if (blockHeight > 0) node.widgets_start_y = Math.max(0, height - blockHeight);
 
   node.__terryBusExpandedSize = [width, height];
@@ -2094,13 +2110,13 @@ app.registerExtension({
         const previousCustomDelta = initialized && previousPreferredHeight > 0
           ? (Number(this.size?.[1]) || 0) - previousPreferredHeight
           : 0;
-        const previousControlHeight = controlBlockHeight(this);
+        const previousControlHeight = nodeControlAreaHeight(this);
 
         const result = originalToggleAdvanced.apply(this, arguments);
 
         if (initialized && previousPreferredHeight > 0) {
           const nextPreferredHeight = previousPreferredHeight
-            + controlBlockHeight(this) - previousControlHeight;
+            + nodeControlAreaHeight(this) - previousControlHeight;
           this.__terryBusPreferredHeight = nextPreferredHeight;
           const width = Math.max(COMPACT_NODE_WIDTH, Number(this.size?.[0]) || 0);
           const height = Math.max(Number(this.__terryBusMinHeight) || 0, nextPreferredHeight + previousCustomDelta);
