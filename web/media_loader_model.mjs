@@ -40,10 +40,9 @@ export function removeMedia(groups, kind, id, referenced) {
     : groups[kind].filter(item => item.id !== id) };
 }
 
-export function mediaLanes(node, groups, namedLanes = {}) {
+export function mediaLanes(node, groups) {
   return MEDIA_KINDS.flatMap(kind => groups[kind].map((asset, index) => {
-    const defaultName = `${MEDIA_LABELS[kind]} ${index + 1}`;
-    const name = String(namedLanes?.[asset.id] || "").trim() || defaultName;
+    const name = `${MEDIA_LABELS[kind]} ${index + 1}`;
     const lane = { id: asset.id, type: MEDIA_TYPES[kind], name };
     return { laneId: asset.id, lane, name, asset, type: lane.type, empty: asset.empty === true,
       source: asset.empty === true ? null : { node, nodeId: node.id, slot: 0, type: lane.type, name, assetId: asset.id } };
