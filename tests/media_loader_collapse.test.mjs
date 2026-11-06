@@ -96,6 +96,19 @@ test("Media Loader bounds its DOM widget to content and trims stale oversized he
   assert.equal(node.size[1], 1164);
 });
 
+test("Media Loader clamps stale saved expanded height when some sections are folded", async () => {
+  const { makeNode } = await fixture();
+  const properties = {
+    terry_media_collapsed: { audio: true, video: true },
+    terry_media_expanded_height: 1600,
+  };
+  const node = makeNode(properties, [640, 1600]);
+  node.__terryMediaLoader.fitLoadedHeight();
+
+  assert.equal(node.properties.terry_media_expanded_height, 1164);
+  assert.ok(node.size[1] < 900);
+});
+
 test("each media section folds independently without changing its assets or bus", async () => {
   const { makeNode, section, toggle, busSyncs } = await fixture();
   const node = makeNode();
