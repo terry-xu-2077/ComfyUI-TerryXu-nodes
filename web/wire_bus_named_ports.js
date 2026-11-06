@@ -678,9 +678,9 @@ function installPortConfigStyle() {
   style.id = "terry-wire-bus-port-config-style";
   style.textContent = `
 .terry-wire-bus-port-config-button{
-  display:grid;place-items:center;box-sizing:border-box;flex:0 0 28px;width:28px;height:24px;
-  margin:0;padding:0;border:0;border-left:1px solid rgba(255,255,255,.14);
-  border-radius:0;background:transparent;color:rgba(230,234,241,.68);
+  display:grid;place-items:center;box-sizing:border-box;flex:0 0 28px;width:28px;height:26px;
+  margin:0;padding:0;border:1px solid rgba(255,255,255,.14);border-radius:6px;
+  background:rgba(255,255,255,.025);color:rgba(230,234,241,.68);
   font:16px/1 system-ui;cursor:pointer;pointer-events:auto;
 }
 .terry-wire-bus-port-config-button:hover,
@@ -912,15 +912,14 @@ function openPortConfig(node) {
 
 function ensurePortConfigButton(node) {
   if (!isWirelessPack(node) && !isUnpack(node)) return;
-  const root = node?.__terryWirelessControl?.root;
-  if (!root || root.querySelector?.(".terry-wire-bus-port-config-button")) return;
+  const slot = node?.__terryBusAdvancedControl?.portConfigSlot;
+  if (!slot || slot.querySelector?.(".terry-wire-bus-port-config-button")) return;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "terry-wire-bus-port-config-button";
   button.textContent = "⚙";
   button.title = labels().portConfig;
   button.setAttribute("aria-label", labels().portConfig);
-  root.classList?.add("has-port-config-button");
   button.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
   });
@@ -929,7 +928,7 @@ function ensurePortConfigButton(node) {
     event.stopPropagation();
     openPortConfig(node);
   });
-  root.append(button);
+  slot.append(button);
 }
 
 function schedule(node) {
