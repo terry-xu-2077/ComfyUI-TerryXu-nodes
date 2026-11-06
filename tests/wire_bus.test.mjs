@@ -392,23 +392,84 @@ test("wireless bus nodes can shrink after being enlarged", async () => {
   assert.deepEqual(node.__terryBusExpandedSize, [150, 120]);
 });
 
-test("Bus-In and Bus-Out expose a single configuration control below the node", async () => {
-  const [bus, visual, namedPorts] = await Promise.all([
+test("Bus-In and Bus-Out keep port settings and spread output inside collapsed advanced inputs", async () => {
+  const [wireSource, namedSource] = await Promise.all([
     readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"),
-    readFile(new URL("../web/wire_bus_visual.js", import.meta.url), "utf8"),
     readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"),
   ]);
-  assert.match(bus, /this\.resizable = true;/);
-  assert.match(bus, /terry_wire_bus_width/);
-  assert.match(visual, /width:\$\{compactWidth\}px !important/);
-  assert.match(namedPorts, /terry-wire-bus-port-config-button/);
-  assert.match(namedPorts, /function openPortConfig\(/);
-  assert.match(namedPorts, /function setPackLanePinned\(/);
-  assert.match(namedPorts, /function setUnpackOutputPinned\(/);
-  assert.doesNotMatch(namedPorts, /\.text-node-component-slot-text:hover::after/);
-  assert.doesNotMatch(namedPorts, /terry-wire-bus-port-actions-visible|deleteNamedLane/);
-});
+  const wire = wireSource.replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  const named = namedSource.replace(/^import .*;\r?\n/gm, "");
+  assert.match(wire, /advancedInputs: "高级输入"/);
+  assert.match(wire, /ADVANCED_INPUTS_EXPANDED_PROPERTY/);
+  assert.doesNotMatch(wire, /has-port-config-button/);
+  assert.match(named, /node\?\.__terryBusAdvancedControl\?\.portConfigSlot/);
 
+  class Element {
+    constructor(tag) {
+      this.tag = tag;
+      this.children = [];
+      this.attributes = {};
+      this.dataset = {};
+      this.style = {};
+      this.events = {};
+      this.classes = new Set();
+      this.classList = {
+        toggle: (name, active) => active ? this.classes.add(name) : this.classes.delete(name),
+        add: name => this.classes.add(name),
+      };
+    }
+    append(...children) {
+      for (const child of children) {
+        child.parentNode = this;
+        this.children.push(child);
+      }
+    }
+    addEventListener(name, callback) { this.events[name] = callback; }
+    setAttribute(name, value) { this.attributes[name] = String(value); }
+    remove() {}
+    querySelector() { return null; }
+  }
+  const document = { head: new Element("head"), getElementById: () => null, createElement: tag => new Element(tag) };
+  const context = vm.createContext({
+    app: { graph: { _nodes: [] }, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
+    document, navigator: { language: "zh-CN" }, queueMicrotask() {},
+  });
+  vm.runInContext(wire + "\nglobalThis.busTest = {initializeAdvancedInputsControl,advancedInputsExpanded,advancedInputsContentHeight,setAdvancedInputsExpanded,controlBlockHeight};", context);
+
+  const graph = { _nodes: [], change() {}, beforeChange() {}, afterChange() {}, setDirtyCanvas() {}, getNodeById() { return null; } };
+  const makeNode = (type, inputs, outputs) => ({
+    id: type.endsWith("Pack") ? 1 : 2, type, graph, inputs, outputs, properties: {}, size: [180, 160],
+    setSize(size) { this.size = size; },
+    addDOMWidget(name, widgetType, root, options) {
+      this.domWidget = { name, root, options };
+      return {};
+    },
+  });
+
+  const pack = makeNode("TerryXuWirelessBusPack", [{ name: "wire", link: null }], [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }]);
+  context.busTest.initializeAdvancedInputsControl(pack);
+  assert.equal(context.busTest.advancedInputsExpanded(pack), false);
+  assert.equal(pack.__terryBusAdvancedControl.panel.hidden, true);
+  assert.equal(context.busTest.advancedInputsContentHeight(pack), 26);
+  assert.equal(context.busTest.controlBlockHeight(pack), 70);
+  context.busTest.setAdvancedInputsExpanded(pack, true);
+  assert.equal(pack.__terryBusAdvancedControl.panel.hidden, false);
+  assert.equal(context.busTest.advancedInputsContentHeight(pack), 60);
+  assert.equal(context.busTest.controlBlockHeight(pack), 104);
+
+  const unpack = makeNode("TerryXuWirelessBusUnpack", [{ name: "bus", link: null }], [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }]);
+  context.busTest.initializeAdvancedInputsControl(unpack);
+  assert.equal(context.busTest.advancedInputsExpanded(unpack), false);
+  assert.equal(unpack.properties.terry_wire_bus_expand_outputs, true);
+  assert.equal(unpack.__terryBusAdvancedControl.panel.hidden, true);
+  assert.equal(unpack.__terryBusAdvancedControl.outputMode.row.parentNode, unpack.__terryBusAdvancedControl.panel);
+  assert.equal(unpack.__terryBusAdvancedControl.outputMode.label.textContent, "散开输出");
+  assert.equal(context.busTest.controlBlockHeight(unpack), 70);
+  context.busTest.setAdvancedInputsExpanded(unpack, true);
+  assert.equal(unpack.__terryBusAdvancedControl.panel.hidden, false);
+  assert.equal(context.busTest.advancedInputsContentHeight(unpack), 94);
+  assert.equal(context.busTest.controlBlockHeight(unpack), 138);
+});
 
 test("port pin icon is a vector outline that can be filled for the pinned state", async () => {
   const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
@@ -467,46 +528,40 @@ test("port configuration exposes rename and pin state for each Bus-In port", asy
   assert.equal(pack.properties.terry_wire_bus_pinned_lanes.lane_camera, true);
 });
 
-test("Bus-Out dropdown arrow reserves a separate slot beside the port configuration button", async () => {
-  const [source, wireSource] = await Promise.all([
-    readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"),
-    readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"),
-  ]);
-  const busUi = source.replace(/^import .*;\r?\n/gm, "");
-  const wireUi = wireSource.replace(/^import .*;\r?\n/gm, "");
-  assert.match(wireUi, /is-select\.has-port-config-button::after\{\s*right:36px/);
-  assert.match(busUi, /box-sizing:border-box;flex:0 0 28px;width:28px/);
-  assert.match(busUi, /root\.classList\?\.add\("has-port-config-button"\)/);
+test("port configuration gear is attached to advanced inputs instead of the channel selector", async () => {
+  const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "");
+  class Element {
+    constructor() { this.children = []; this.events = {}; this.className = ""; }
+    addEventListener(name, callback) { this.events[name] = callback; }
+    setAttribute() {}
+    append(child) { this.children.push(child); }
+    querySelector() { return null; }
+  }
   const context = vm.createContext({
     app: { graph: { _nodes: [] }, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
-    document: {
-      createElement() {
-        return {
-          addEventListener() {},
-          setAttribute() {},
-          className: "",
-          textContent: "",
-          title: "",
-          type: "",
-        };
-      },
-    },
+    document: { createElement: () => new Element() },
     navigator: { language: "zh-CN" },
     setTimeout() {},
   });
-  vm.runInContext(busUi + "\nglobalThis.configTest = { ensurePortConfigButton };", context);
+  vm.runInContext(source + "\nglobalThis.configTest = { ensurePortConfigButton };", context);
 
-  const appended = [];
-  const root = { classList: { values: [], add(value) { this.values.push(value); } }, querySelector() { return null; }, append(button) { appended.push(button); } };
-  const node = { type: "TerryXuWirelessBusPack", __terryWirelessControl: { root } };
+  const slot = new Element();
+  const channelRoot = new Element();
+  const node = {
+    type: "TerryXuWirelessBusUnpack",
+    __terryWirelessControl: { root: channelRoot },
+    __terryBusAdvancedControl: { portConfigSlot: slot },
+  };
   context.configTest.ensurePortConfigButton(node);
 
-  assert.equal(appended.length, 1);
-  assert.equal(appended[0].className, "terry-wire-bus-port-config-button");
-  assert.equal(appended[0].textContent, "⚙");
-  assert.equal(appended[0].title, "端口配置");
-  assert.deepEqual(root.classList.values, ["has-port-config-button"]);
+  assert.equal(slot.children.length, 1);
+  assert.equal(slot.children[0].className, "terry-wire-bus-port-config-button");
+  assert.equal(slot.children[0].textContent, "⚙");
+  assert.equal(slot.children[0].title, "端口配置");
+  assert.equal(channelRoot.children.length, 0);
 });
+
 test("Bus-Out keeps its manual width with a Media Loader source", async () => {
   const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
     .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
