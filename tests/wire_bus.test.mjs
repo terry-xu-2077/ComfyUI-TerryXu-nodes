@@ -260,6 +260,10 @@ test("Bus port configuration replaces inline edit and delete affordances", async
   assert.match(busUi, /function createPortPinIcon\(/);
   assert.match(busUi, /terry-wire-bus-port-pin-shape/);
   assert.match(busUi, /fill:currentColor/);
+  assert.match(busUi, /border-color:#424954;background:transparent;color:#b85d6b/);
+  assert.match(busUi, /transform:rotate\(35deg\)/);
+  assert.match(busUi, /border-color:#8392a5;background:rgba\(255,255,255,\.045\);color:#c16b78/);
+  assert.doesNotMatch(busUi, /\.terry-wire-bus-port-config-pin\.is-pinned\{\s*border-color:rgba\(255/);
   assert.match(busUi, /text\.unfix/);
   assert.doesNotMatch(busUi, /textContent = "📌"/);
   assert.match(busUi, /terry_wire_bus_pinned_lanes/);
