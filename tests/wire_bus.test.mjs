@@ -487,16 +487,18 @@ test("Media Loader replacement preserves Bus-Out links and keeps H3 inputs in me
 
   let firstGroups = { image: [asset("a"), asset("b")], audio: [], video: [] };
   let secondGroups = { image: [asset("x"), asset("y")], audio: [], video: [] };
-  const makeMediaLoader = (id, getGroups) => {
+  const makeMediaLoader = (id, getGroups, getNames = () => ({})) => {
     const node = {
       id, type: "TerryXuMediaLoader", graph, size: [640, 740],
       outputs: [{ name: "bus", type: BUS, links: [] }],
     };
-    node.__terryBusLaneEntries = () => mediaLanes(node, getGroups());
+    node.__terryBusLaneEntries = () => mediaLanes(node, getGroups(), getNames());
     return node;
   };
-  const firstLoader = makeMediaLoader(1, () => firstGroups);
-  const secondLoader = makeMediaLoader(4, () => secondGroups);
+  const firstNames = { a: "Alpha custom", b: "Beta custom" };
+  const secondNames = { x: "X-ray custom", y: "Yankee custom", z: "Zulu custom" };
+  const firstLoader = makeMediaLoader(1, () => firstGroups, () => firstNames);
+  const secondLoader = makeMediaLoader(4, () => secondGroups, () => secondNames);
   firstLoader.outputs[0].links = [1];
 
   const makeOutput = (name, type, laneId, slot, links) => {
@@ -541,6 +543,7 @@ test("Media Loader replacement preserves Bus-Out links and keeps H3 inputs in me
   const stablePorts = [...busOut.outputs];
   assert.equal(busOut.outputs[0].terry_lane_id, "a");
   assert.equal(busOut.outputs[1].terry_lane_id, "b");
+  assert.deepEqual(busOut.outputs.map(output => output.name), ["图片 1", "图片 2"]);
 
   // Disconnecting the old loader is a transient state: it must not remove
   // output slots or sever either H3 connection.
@@ -563,6 +566,8 @@ test("Media Loader replacement preserves Bus-Out links and keeps H3 inputs in me
   assert.equal(busOut.outputs[0], stablePorts[0]);
   assert.equal(busOut.outputs[1], stablePorts[1]);
   assert.deepEqual(busOut.outputs.map(output => output.terry_lane_id), ["x", "y"]);
+  assert.deepEqual(secondLoader.__terryBusLaneEntries().map(entry => entry.name), ["X-ray custom", "Yankee custom"]);
+  assert.deepEqual(busOut.outputs.map(output => output.name), ["图片 1", "图片 2"]);
   assert.deepEqual(busOut.outputs.map(output => output.links), [[2], [3]]);
   assert.equal(graph.links[2].origin_slot, 0);
   assert.equal(graph.links[3].origin_slot, 1);
@@ -581,6 +586,8 @@ test("Media Loader replacement preserves Bus-Out links and keeps H3 inputs in me
   assert.equal(busOut.outputs[0], stablePorts[0]);
   assert.equal(busOut.outputs[1], stablePorts[1]);
   assert.deepEqual(busOut.outputs.map(output => output.terry_lane_id), ["y", "x"]);
+  assert.deepEqual(secondLoader.__terryBusLaneEntries().map(entry => entry.name), ["Yankee custom", "X-ray custom"]);
+  assert.deepEqual(busOut.outputs.map(output => output.name), ["图片 1", "图片 2"]);
   assert.equal(graph.links[2].origin_slot, 0);
   assert.equal(graph.links[3].origin_slot, 1);
   ({ output } = await app.graphToPrompt());
@@ -605,4 +612,54 @@ test("Media Loader replacement preserves Bus-Out links and keeps H3 inputs in me
   assert.equal(busOut.outputs[1].terry_lane_id, "z");
   assert.deepEqual(busOut.outputs[1].links, [3]);
   assert.equal(graph.links[3].origin_slot, 1);
+});
+
+
+test("Media Loader custom asset names never rename ordinal Bus-Out ports", async () => {
+  const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "");
+  const graph = {
+    _nodes: [],
+    links: { 1: { id: 1, origin_id: 1, origin_slot: 0, target_id: 2, target_slot: 0, type: BUS } },
+    getNodeById(id) { return this._nodes.find(node => String(node.id) === String(id)); },
+  };
+  const app = {
+    graph,
+    ui: { settings: { getSettingValue: () => "zh-CN" } },
+    registerExtension() {},
+  };
+  const context = vm.createContext({
+    app,
+    showTextPrompt: async () => null,
+    showConfirm: async () => false,
+    navigator: { language: "zh-CN" },
+    setTimeout() {},
+  });
+  vm.runInContext(source + "\nglobalThis.namedPorts = { applyNames, outputRenameEntries };", context);
+
+  const mediaLoader = {
+    id: 1, type: "TerryXuMediaLoader", graph,
+    outputs: [{ name: "bus", type: BUS, links: [1] }],
+    properties: { terry_wire_bus_named_lanes: { assetA: "Original A name", assetB: "Original B name" } },
+    __terryBusLaneEntries: () => [
+      { laneId: "assetA", name: "Original A name", type: "IMAGE" },
+      { laneId: "assetB", name: "Original B name", type: "IMAGE" },
+    ],
+    setDirtyCanvas() {},
+  };
+  const busOut = {
+    id: 2, type: "TerryXuWirelessBusUnpack", graph,
+    inputs: [{ name: "bus", type: BUS, link: 1 }],
+    outputs: [
+      { name: "图片 1", label: "图片 1", type: "IMAGE", terry_lane_id: "assetA", links: [] },
+      { name: "图片 2", label: "图片 2", type: "IMAGE", terry_lane_id: "assetB", links: [] },
+    ],
+    properties: {},
+    setDirtyCanvas() {},
+  };
+  graph._nodes.push(mediaLoader, busOut);
+
+  context.namedPorts.applyNames(mediaLoader);
+  assert.deepEqual(busOut.outputs.map(output => output.name), ["图片 1", "图片 2"]);
+  assert.equal(context.namedPorts.outputRenameEntries(busOut).length, 0);
 });
