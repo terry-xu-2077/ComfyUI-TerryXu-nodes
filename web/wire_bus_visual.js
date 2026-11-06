@@ -538,16 +538,16 @@ ${expandedRoot}{
   min-width:112px !important;
   max-width:none !important;
   height:${nodeHeight}px !important;
-  min-height:${nodeHeight}px !important;
-  max-height:${nodeHeight}px !important;
+  min-height:${minBodyHeight + nodeTitleHeight()}px !important;
+  max-height:none !important;
 }
 ${expandedRoot} [data-testid="node-inner-wrapper"]{
   width:${compactWidth}px !important;
   min-width:112px !important;
   max-width:none !important;
   height:${nodeHeight}px !important;
-  min-height:${nodeHeight}px !important;
-  max-height:${nodeHeight}px !important;
+  min-height:${minBodyHeight + nodeTitleHeight()}px !important;
+  max-height:none !important;
 }
 ${root}[data-collapsed]{
   --min-node-width:112px !important;
@@ -853,10 +853,15 @@ function patchBusNode(node) {
     const result = originalResize?.apply?.(this, arguments);
     if (isWirelessBusNode(this)) {
       const width = Math.max(112, Number(this.size?.[0]) || 112);
-      const expandedHeight = Number(this.__terryBusExpandedSize?.[1]) || Number(this.size?.[1]) || 0;
+      const minimumHeight = Math.max(0, Number(this.__terryBusMinHeight) || 0);
+      const wasCollapsed = Boolean(this.flags?.collapsed);
+      const storedHeight = Number(this.__terryBusExpandedSize?.[1]) || 0;
+      const expandedHeight = wasCollapsed
+        ? Math.max(minimumHeight, storedHeight)
+        : Math.max(minimumHeight, Number(this.size?.[1]) || minimumHeight);
       if (Array.isArray(this.size)) {
         this.size[0] = width;
-        if (!this.flags?.collapsed && expandedHeight > 0) this.size[1] = expandedHeight;
+        if (!wasCollapsed) this.size[1] = expandedHeight;
       }
       this.__terryBusCompactWidth = width;
       if (!this.properties || typeof this.properties !== "object") this.properties = {};
