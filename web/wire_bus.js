@@ -1302,7 +1302,11 @@ function controlBlockHeight(node) {
 
 function nativeAdvancedFooterReserveHeight(node) {
   if (!isWireless(node) || globalThis.LiteGraph?.vueNodesMode !== true) return 0;
-  return alwaysShowAdvancedWidgets() ? 0 : VUE_NODE_ADVANCED_FOOTER_RESERVE;
+  // NodeFooter remains visible when the node has already been toggled open,
+  // even if the global "always show advanced" setting is enabled.
+  return alwaysShowAdvancedWidgets() && node?.showAdvanced !== true
+    ? 0
+    : VUE_NODE_ADVANCED_FOOTER_RESERVE;
 }
 
 function nodeControlAreaHeight(node) {
