@@ -59,7 +59,7 @@ test("only wireless channel bus nodes are registered", async () => {
 });
 
 
-test("manually named Bus-In lanes stay pinned when disconnected and keep their custom name", async () => {
+test("renaming an empty Bus-In port does not pin it and automatic cleanup removes it", async () => {
   const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
     .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
   const graph = { _nodes: [], setDirtyCanvas() {} };
@@ -74,14 +74,11 @@ test("manually named Bus-In lanes stay pinned when disconnected and keep their c
   const lane = { name: "wire", label: "[空] 摄影机模型", type: "*", link: null, terry_lane_id: "lane_camera" };
   const addWire = { name: "wire", label: "添加线束", type: "*", link: null };
   const pack = {
-    id: 10,
-    type: "TerryXuWirelessBusPack",
-    graph,
+    id: 10, type: "TerryXuWirelessBusPack", graph,
     properties: { terry_wire_bus_named_lanes: { lane_camera: "摄影机模型" } },
     inputs: [lane, addWire],
     outputs: [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }],
-    size: [112, 120],
-    setSize(size) { this.size = size; },
+    size: [112, 120], setSize(size) { this.size = size; },
     removeInput(index) { this.inputs.splice(index, 1); },
     addInput(name, type) {
       const input = { name, label: name, type, link: null };
@@ -91,13 +88,126 @@ test("manually named Bus-In lanes stay pinned when disconnected and keep their c
   };
   graph._nodes.push(pack);
 
-  const entries = context.busTest.packLaneEntries(pack);
-  assert.equal(entries[0].name, "摄影机模型");
-  assert.equal(entries[0].lane.named, true);
+  assert.equal(context.busTest.packLaneEntries(pack)[0].lane.named, true);
+  context.busTest.refreshPackSlots(pack);
+  assert.equal(pack.inputs.some((input) => input.terry_lane_id === "lane_camera"), false);
+  assert.equal(pack.properties.terry_wire_bus_named_lanes.lane_camera, undefined);
+});
+
+test("pinned empty Bus-In ports survive cleanup until they are unpinned", async () => {
+  const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  const graph = { _nodes: [], setDirtyCanvas() {} };
+  const context = vm.createContext({
+    app: { graph, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
+    mediaExecutionSource, navigator: { language: "zh-CN" },
+    LiteGraph: { INPUT: 1, OUTPUT: 2, NODE_TITLE_HEIGHT: 30, NODE_SLOT_HEIGHT: 20 },
+    queueMicrotask() {},
+  });
+  vm.runInContext(source + "\nglobalThis.busTest = {packLaneEntries,refreshPackSlots};", context);
+
+  const lane = { name: "wire", label: "[空] 保留端口", type: "*", link: null, terry_lane_id: "lane_fixed" };
+  const addWire = { name: "wire", label: "添加线束", type: "*", link: null };
+  const pack = {
+    id: 12, type: "TerryXuWirelessBusPack", graph,
+    properties: {
+      terry_wire_bus_named_lanes: { lane_fixed: "保留端口" },
+      terry_wire_bus_pinned_lanes: { lane_fixed: true },
+    },
+    inputs: [lane, addWire],
+    outputs: [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }],
+    size: [112, 120], setSize(size) { this.size = size; },
+    removeInput(index) { this.inputs.splice(index, 1); },
+    addInput(name, type) {
+      const input = { name, label: name, type, link: null };
+      this.inputs.push(input);
+      return input;
+    },
+  };
+  graph._nodes.push(pack);
 
   context.busTest.refreshPackSlots(pack);
-  assert.equal(pack.inputs.some((input) => input.terry_lane_id === "lane_camera"), true);
-  assert.equal(pack.properties.terry_wire_bus_named_lanes.lane_camera, "摄影机模型");
+  assert.equal(pack.inputs.some((input) => input.terry_lane_id === "lane_fixed"), true);
+  assert.equal(context.busTest.packLaneEntries(pack)[0].lane.pinned, true);
+
+  delete pack.properties.terry_wire_bus_pinned_lanes.lane_fixed;
+  context.busTest.refreshPackSlots(pack);
+  assert.equal(pack.inputs.some((input) => input.terry_lane_id === "lane_fixed"), false);
+});
+test("resizing a wireless bus node down ignores its previously stored larger width", async () => {
+  const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  const context = vm.createContext({
+    app: { graph: { _nodes: [] }, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
+    mediaExecutionSource, navigator: { language: "zh-CN" },
+    LiteGraph: { INPUT: 1, OUTPUT: 2, NODE_TITLE_HEIGHT: 30, NODE_SLOT_HEIGHT: 20 },
+    queueMicrotask() {},
+  });
+  vm.runInContext(source + "\nglobalThis.layoutTest = {resizeCompactBusNode,stableExpandedHeight};", context);
+  const node = {
+    type: "TerryXuWirelessBusPack",
+    size: [180, 130],
+    properties: { terry_wire_bus_width: 320 },
+    __terryBusLayoutInitialized: true,
+    __terryBusPreferredHeight: 112,
+    __terryBusMinHeight: 100,
+    inputs: [{ name: "wire", type: "IMAGE", terry_lane_id: "lane_a", link: 1 }],
+    outputs: [{ name: "bus", type: BUS, links: [] }],
+    setSize(size) { this.size = size; },
+  };
+  context.layoutTest.resizeCompactBusNode(node, 1);
+  assert.equal(node.size[0], 180);
+  assert.equal(node.size[1], 130);
+  assert.equal(context.layoutTest.stableExpandedHeight(node), 130);
+});
+
+test("a pinned Bus-Out port keeps its empty upstream Bus-In lane", async () => {
+  const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  const graph = {
+    _nodes: [],
+    links: { 1: { id: 1, origin_id: 20, origin_slot: 0, target_id: 21, target_slot: 0, type: BUS } },
+    getNodeById(id) { return this._nodes.find(node => String(node.id) === String(id)); },
+    setDirtyCanvas() {},
+    change() {},
+  };
+  const context = vm.createContext({
+    app: { graph, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
+    mediaExecutionSource, navigator: { language: "zh-CN" },
+    LiteGraph: { INPUT: 1, OUTPUT: 2, NODE_TITLE_HEIGHT: 30, NODE_SLOT_HEIGHT: 20 },
+    queueMicrotask() {},
+  });
+  vm.runInContext(source + "\nglobalThis.busTest = {refreshPackSlots};", context);
+
+  const pack = {
+    id: 20, type: "TerryXuWirelessBusPack", graph,
+    properties: { terry_wire_bus_lanes: [{ id: "lane_empty", name: "空端口", type: "*" }] },
+    inputs: [
+      { name: "wire", label: "[空] 空端口", type: "*", link: null, terry_lane_id: "lane_empty" },
+      { name: "wire", label: "添加线束", type: "*", link: null },
+    ],
+    outputs: [{ name: "bus", type: BUS, links: [1] }],
+    size: [180, 140], setSize(size) { this.size = size; },
+    removeInput(index) { this.inputs.splice(index, 1); },
+    addInput(name, type) { const input = { name, label: name, type, link: null }; this.inputs.push(input); return input; },
+  };
+  const unpack = {
+    id: 21, type: "TerryXuWirelessBusUnpack", graph,
+    inputs: [{ name: "bus", type: BUS, link: 1 }],
+    outputs: [{ name: "空端口", label: "空端口", type: "*", terry_lane_id: "lane_empty", links: [] }],
+    properties: { terry_wire_bus_expand_outputs: true, terry_wire_bus_pinned_outputs: { "0": true } },
+    size: [180, 140], setSize(size) { this.size = size; },
+    removeOutput(index) { this.outputs.splice(index, 1); },
+    addOutput(name, type) { const output = { name, label: name, type, links: [] }; this.outputs.push(output); return output; },
+  };
+  graph._nodes.push(pack, unpack);
+
+  context.busTest.refreshPackSlots(pack);
+  assert.equal(pack.inputs.some(input => input.terry_lane_id === "lane_empty"), true);
+
+  delete unpack.properties.terry_wire_bus_pinned_outputs["0"];
+  context.busTest.refreshPackSlots(pack);
+  assert.equal(pack.inputs.some(input => input.terry_lane_id === "lane_empty"), false);
 });
 
 test("unnamed empty Bus-In lanes remain eligible for automatic cleanup", async () => {
@@ -137,23 +247,22 @@ test("unnamed empty Bus-In lanes remain eligible for automatic cleanup", async (
 });
 
 
-test("switch and Bus-In lane names use the shared TerryXu dialog instead of browser-native prompts", async () => {
+test("Bus port configuration replaces inline edit and delete affordances", async () => {
   const [switchUi, busUi, dialog] = await Promise.all([
     readFile(new URL("../web/switch_ui.js", import.meta.url), "utf8"),
     readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"),
     readFile(new URL("../web/terry_dialog.js", import.meta.url), "utf8"),
   ]);
   assert.match(switchUi, /from "\.\/terry_dialog\.js"/);
-  assert.match(busUi, /from "\.\/terry_dialog\.js"/);
   assert.match(switchUi, /showTextPrompt\(/);
-  assert.match(busUi, /showTextPrompt\(/);
-  assert.match(busUi, /showConfirm\(/);
-  assert.doesNotMatch(switchUi, /globalThis\.prompt|window\.prompt/);
-  assert.doesNotMatch(busUi, /globalThis\.prompt|window\.prompt|globalThis\.confirm|window\.confirm/);
+  assert.match(busUi, /terry-wire-bus-port-config-button/);
+  assert.match(busUi, /terry-wire-bus-port-config-overlay/);
+  assert.match(busUi, /textContent = "📌"/);
+  assert.match(busUi, /terry_wire_bus_pinned_lanes/);
+  assert.match(busUi, /terry_wire_bus_pinned_outputs/);
+  assert.doesNotMatch(busUi, /\.text-node-component-slot-text:hover::after/);
+  assert.doesNotMatch(busUi, /terry-wire-bus-port-actions-visible|deleteNamedLane/);
   assert.match(dialog, /aria-modal/);
-  assert.match(dialog, /terryxu-dialog-backdrop/);
-  assert.match(dialog, /showTextPrompt/);
-  assert.match(dialog, /showConfirm/);
 });
 
 
@@ -244,7 +353,7 @@ test("renaming a Bus-Out lane updates its owning Bus-In and every paired Bus-Out
 });
 
 
-test("wireless bus nodes keep a user-adjusted width while preserving automatic height", async () => {
+test("wireless bus nodes can shrink after being enlarged", async () => {
   const source = (await readFile(new URL("../web/wire_bus_visual.js", import.meta.url), "utf8"))
     .replace(/^import .*;\r?\n/gm, "");
   const context = vm.createContext({
@@ -258,19 +367,24 @@ test("wireless bus nodes keep a user-adjusted width while preserving automatic h
     size: [112, 180],
     properties: {},
     __terryBusExpandedSize: [112, 180],
+    __terryBusMinHeight: 120,
     onResize() {},
   };
   context.patchBusNode(node);
   node.size = [280, 260];
   node.onResize();
 
-  assert.equal(node.size[0], 280);
-  assert.equal(node.size[1], 180);
+  assert.deepEqual(node.size, [280, 260]);
   assert.equal(node.properties.terry_wire_bus_width, 280);
   assert.equal(node.__terryBusCompactWidth, 280);
+
+  node.size = [150, 90];
+  node.onResize();
+  assert.deepEqual(node.size, [150, 120]);
+  assert.deepEqual(node.__terryBusExpandedSize, [150, 120]);
 });
 
-test("Bus-In and Bus-Out edit icons are shown only while hovering a port label", async () => {
+test("Bus-In and Bus-Out expose a single configuration control below the node", async () => {
   const [bus, visual, namedPorts] = await Promise.all([
     readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"),
     readFile(new URL("../web/wire_bus_visual.js", import.meta.url), "utf8"),
@@ -279,68 +393,79 @@ test("Bus-In and Bus-Out edit icons are shown only while hovering a port label",
   assert.match(bus, /this\.resizable = true;/);
   assert.match(bus, /terry_wire_bus_width/);
   assert.match(visual, /width:\$\{compactWidth\}px !important/);
-  assert.match(namedPorts, /\.text-node-component-slot-text:hover::after/);
-  assert.match(namedPorts, /terry-wire-bus-port-actions-visible::after/);
-  assert.match(namedPorts, /document\.addEventListener\("pointerover"/);
-  assert.match(namedPorts, /document\.addEventListener\("pointerout"/);
-  assert.doesNotMatch(namedPorts, /label = `\$\{entry\.label\}   \$\{PENCIL\}/);
+  assert.match(namedPorts, /terry-wire-bus-port-config-button/);
+  assert.match(namedPorts, /function openPortConfig\(/);
+  assert.match(namedPorts, /function setPackLanePinned\(/);
+  assert.match(namedPorts, /function setUnpackOutputPinned\(/);
+  assert.doesNotMatch(namedPorts, /\.text-node-component-slot-text:hover::after/);
+  assert.doesNotMatch(namedPorts, /terry-wire-bus-port-actions-visible|deleteNamedLane/);
 });
 
 
-test("delete affordance appears after hovering a named port label and stays while moving to it", async () => {
+test("port configuration exposes rename and pin state for each Bus-In port", async () => {
   const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
     .replace(/^import .*;\r?\n/gm, "");
-  const listeners = {};
-  const document = {
-    getElementById() { return null; },
-    createElement() { return { id: "", textContent: "" }; },
-    head: { append() {} },
-    addEventListener(name, handler) { (listeners[name] ||= []).push(handler); },
-    querySelectorAll() { return []; },
-  };
-  const extensions = [];
+  const graph = { change() {}, setDirtyCanvas() {} };
   const context = vm.createContext({
-    app: { graph: { _nodes: [] }, registerExtension(extension) { extensions.push(extension); } },
-    document,
+    app: { graph: { _nodes: [] }, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
     navigator: { language: "zh-CN" },
-    showTextPrompt: () => Promise.resolve(null),
-    showConfirm: () => Promise.resolve(false),
   });
-  vm.runInContext(source, context);
-  extensions[0].setup();
+  vm.runInContext(source + "\nglobalThis.configTest = {portConfigEntries,setPackLanePinned};", context);
 
-  const classes = new Set();
-  const row = {
-    classList: {
-      add(...names) { names.forEach((name) => classes.add(name)); },
-      remove(...names) { names.forEach((name) => classes.delete(name)); },
-      contains(name) { return classes.has(name); },
+  const pack = {
+    id: 15, type: "TerryXuWirelessBusPack", graph,
+    properties: {
+      terry_wire_bus_lanes: [{ id: "lane_camera", name: "摄影机模型", type: "IMAGE" }],
+      terry_wire_bus_named_lanes: { lane_camera: "摄影机模型" },
     },
-    contains(target) { return target === this || target === span; },
+    inputs: [
+      { name: "摄影机模型", label: "摄影机模型", type: "IMAGE", link: 1, terry_lane_id: "lane_camera" },
+      { name: "wire", label: "添加线束", type: "*", link: null },
+    ],
   };
-  const span = {
-    closest(selector) {
-      return selector === ".lg-slot--input.terry-wire-bus-named-lane" ? row : null;
-    },
-  };
-  const target = {
-    closest(selector) {
-      if (selector === ".text-node-component-slot-text") return span;
-      if (selector === ".lg-slot--input.terry-wire-bus-named-lane") return row;
-      return null;
-    },
-  };
+  const first = context.configTest.portConfigEntries(pack);
+  assert.equal(first.length, 1);
+  assert.equal(first[0].label, "摄影机模型");
+  assert.equal(first[0].pinned, false);
 
-  for (const handler of listeners.pointerover || []) handler({ target });
-  assert.equal(classes.has("terry-wire-bus-port-actions-visible"), true);
-
-  for (const handler of listeners.pointerout || []) handler({ target, relatedTarget: row });
-  assert.equal(classes.has("terry-wire-bus-port-actions-visible"), true);
-
-  for (const handler of listeners.pointerout || []) handler({ target, relatedTarget: {} });
-  assert.equal(classes.has("terry-wire-bus-port-actions-visible"), false);
+  context.configTest.setPackLanePinned(pack, first[0].entry, true);
+  const afterPin = context.configTest.portConfigEntries(pack);
+  assert.equal(afterPin[0].pinned, true);
+  assert.equal(pack.properties.terry_wire_bus_pinned_lanes.lane_camera, true);
 });
 
+test("wireless bus channel control receives the port configuration gear button", async () => {
+  const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "");
+  const context = vm.createContext({
+    app: { graph: { _nodes: [] }, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
+    document: {
+      createElement() {
+        return {
+          addEventListener() {},
+          setAttribute() {},
+          className: "",
+          textContent: "",
+          title: "",
+          type: "",
+        };
+      },
+    },
+    navigator: { language: "zh-CN" },
+    setTimeout() {},
+  });
+  vm.runInContext(source + "\nglobalThis.configTest = { ensurePortConfigButton };", context);
+
+  const appended = [];
+  const root = { querySelector() { return null; }, append(button) { appended.push(button); } };
+  const node = { type: "TerryXuWirelessBusPack", __terryWirelessControl: { root } };
+  context.configTest.ensurePortConfigButton(node);
+
+  assert.equal(appended.length, 1);
+  assert.equal(appended[0].className, "terry-wire-bus-port-config-button");
+  assert.equal(appended[0].textContent, "⚙");
+  assert.equal(appended[0].title, "端口配置");
+});
 test("Bus-Out keeps its manual width with a Media Loader source", async () => {
   const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
     .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
@@ -377,6 +502,69 @@ test("Bus-Out keeps its manual width with a Media Loader source", async () => {
   assert.equal(busOut.widgets_start_y, busOut.size[1] - 70);
 });
 
+
+test("renamed-only Media Bus-Out ports disappear while pinned empty ports remain", async () => {
+  const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
+  const graph = {
+    _nodes: [],
+    links: { 1: { id: 1, origin_id: 1, origin_slot: 0, target_id: 2, target_slot: 0, type: BUS } },
+    getNodeById(id) { return this._nodes.find(node => String(node.id) === String(id)); },
+    setDirtyCanvas() {},
+  };
+  const context = vm.createContext({
+    app: { graph, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
+    mediaExecutionSource, navigator: { language: "zh-CN" },
+    LiteGraph: { INPUT: 1, OUTPUT: 2, NODE_TITLE_HEIGHT: 30, NODE_SLOT_HEIGHT: 20 },
+    queueMicrotask() {},
+  });
+  vm.runInContext(source + "\nglobalThis.busTest = {syncUnpack};", context);
+
+  const mediaLoader = {
+    id: 1, type: "TerryXuMediaLoader", graph,
+    outputs: [{ type: BUS, links: [1] }],
+    __terryBusLaneEntries: () => [],
+  };
+  const busOut = {
+    id: 2, type: "TerryXuWirelessBusUnpack", graph,
+    inputs: [{ type: BUS, link: 1 }],
+    outputs: [{ name: "自定义名称", label: "自定义名称", type: "IMAGE", links: [] }],
+    properties: {
+      terry_wire_bus_expand_outputs: true,
+      terry_wire_bus_media_outputs: true,
+      terry_wire_bus_named_outputs: { "0": "自定义名称" },
+    },
+    addOutput(name, type) { const output = { name, label: name, type, links: [] }; this.outputs.push(output); return output; },
+    removeOutput(index) { this.outputs.splice(index, 1); },
+    setSize(size) { this.size = size; },
+    size: [180, 160],
+  };
+  graph._nodes.push(mediaLoader, busOut);
+
+  context.busTest.syncUnpack(busOut, true);
+  assert.equal(busOut.outputs.length, 0);
+  assert.equal(busOut.properties.terry_wire_bus_named_outputs, undefined);
+
+  busOut.outputs.push({ name: "固定空端口", label: "固定空端口", type: "IMAGE", links: [] });
+  busOut.properties.terry_wire_bus_named_outputs = { "0": "固定空端口" };
+  busOut.properties.terry_wire_bus_pinned_outputs = { "0": true };
+  context.busTest.syncUnpack(busOut, true);
+  assert.equal(busOut.outputs.length, 1);
+  assert.match(busOut.outputs[0].name, /固定空端口/);
+
+  delete busOut.properties.terry_wire_bus_pinned_outputs["0"];
+  context.busTest.syncUnpack(busOut, true);
+  assert.equal(busOut.outputs.length, 0);
+
+  busOut.properties.terry_wire_bus_pinned_outputs = { "0": true };
+  busOut.properties.terry_wire_bus_pinned_output_types = { "0": "IMAGE" };
+  busOut.properties.terry_wire_bus_pinned_output_defaults = { "0": "图片 1" };
+  busOut.outputs = [];
+  context.busTest.syncUnpack(busOut, true);
+  assert.equal(busOut.outputs.length, 1);
+  assert.equal(busOut.outputs[0].type, "IMAGE");
+  assert.equal(busOut.outputs[0].__terryBusDefaultLabel, "图片 1");
+});
 
 test("Media Loader replacement preserves Bus-Out links and keeps H3 inputs in media order", async () => {
   const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
