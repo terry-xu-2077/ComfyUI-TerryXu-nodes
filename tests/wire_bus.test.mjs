@@ -257,7 +257,11 @@ test("Bus port configuration replaces inline edit and delete affordances", async
   assert.match(switchUi, /showTextPrompt\(/);
   assert.match(busUi, /terry-wire-bus-port-config-button/);
   assert.match(busUi, /terry-wire-bus-port-config-overlay/);
-  assert.match(busUi, /textContent = "📌"/);
+  assert.match(busUi, /function createPortPinIcon\(/);
+  assert.match(busUi, /terry-wire-bus-port-pin-shape/);
+  assert.match(busUi, /fill:currentColor/);
+  assert.match(busUi, /text\.unfix/);
+  assert.doesNotMatch(busUi, /textContent = "📌"/);
   assert.match(busUi, /terry_wire_bus_pinned_lanes/);
   assert.match(busUi, /terry_wire_bus_pinned_outputs/);
   assert.doesNotMatch(busUi, /\.text-node-component-slot-text:hover::after/);
@@ -401,6 +405,31 @@ test("Bus-In and Bus-Out expose a single configuration control below the node", 
   assert.doesNotMatch(namedPorts, /terry-wire-bus-port-actions-visible|deleteNamedLane/);
 });
 
+
+test("port pin icon is a vector outline that can be filled for the pinned state", async () => {
+  const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\r?\n/gm, "");
+  const document = {
+    createElementNS(namespace, tagName) {
+      return {
+        tagName,
+        attributes: {},
+        children: [],
+        setAttribute(name, value) { this.attributes[name] = value; },
+        append(...children) { this.children.push(...children); },
+      };
+    },
+  };
+  const context = vm.createContext({ document });
+  vm.runInContext(source + "\nglobalThis.configTest = { createPortPinIcon };", context);
+
+  const icon = context.configTest.createPortPinIcon();
+  assert.equal(icon.tagName, "svg");
+  assert.equal(icon.attributes.viewBox, "0 0 24 24");
+  assert.equal(icon.children.length, 2);
+  assert.equal(icon.children[0].attributes.class, "terry-wire-bus-port-pin-shape");
+  assert.equal(icon.children[1].attributes.class, "terry-wire-bus-port-pin-stem");
+});
 
 test("port configuration exposes rename and pin state for each Bus-In port", async () => {
   const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
