@@ -736,13 +736,16 @@ function installPortConfigStyle() {
   border-color:#8392a5;color:#c5ceda;background:rgba(255,255,255,.045);
 }
 .terry-wire-bus-port-config-pin.is-pinned{
-  border-color:rgba(255,132,83,.62);background:rgba(255,117,64,.13);color:#ff8758;
+  border-color:#424954;background:transparent;color:#b85d6b;
+}
+.terry-wire-bus-port-config-pin.is-pinned .terry-wire-bus-port-pin-icon{
+  transform:rotate(35deg);
 }
 .terry-wire-bus-port-config-pin.is-pinned .terry-wire-bus-port-pin-shape{
   fill:currentColor;
 }
 .terry-wire-bus-port-config-pin.is-pinned:hover{
-  border-color:#ff9a73;background:rgba(255,117,64,.2);color:#ffa17d;
+  border-color:#8392a5;background:rgba(255,255,255,.045);color:#c16b78;
 }
 .terry-wire-bus-port-config-empty{padding:24px 8px;color:#8f98a6;text-align:center}
 .terry-wire-bus-port-config-foot{display:flex;justify-content:flex-end}
