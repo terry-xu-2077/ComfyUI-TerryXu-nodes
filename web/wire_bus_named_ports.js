@@ -678,8 +678,8 @@ function installPortConfigStyle() {
   style.id = "terry-wire-bus-port-config-style";
   style.textContent = `
 .terry-wire-bus-port-config-button{
-  display:grid;place-items:center;flex:0 0 28px;width:28px;height:24px;
-  margin:0 2px 0 0;padding:0;border:0;border-left:1px solid rgba(255,255,255,.14);
+  display:grid;place-items:center;box-sizing:border-box;flex:0 0 28px;width:28px;height:24px;
+  margin:0;padding:0;border:0;border-left:1px solid rgba(255,255,255,.14);
   border-radius:0;background:transparent;color:rgba(230,234,241,.68);
   font:16px/1 system-ui;cursor:pointer;pointer-events:auto;
 }
@@ -920,6 +920,7 @@ function ensurePortConfigButton(node) {
   button.textContent = "⚙";
   button.title = labels().portConfig;
   button.setAttribute("aria-label", labels().portConfig);
+  root.classList?.add("has-port-config-button");
   button.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
   });
