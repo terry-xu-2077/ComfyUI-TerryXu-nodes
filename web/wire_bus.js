@@ -644,6 +644,7 @@ function setAdvancedInputsExpanded(node, value, notify = true) {
   properties[ADVANCED_INPUTS_EXPANDED_PROPERTY] = next;
   refreshAdvancedInputsControl(node);
   resizeAdvancedInputsNode(node);
+  if (isWirelessPack(node)) queueMicrotask(syncAllUnpacks);
   node.graph?.afterChange?.();
   node.graph?.setDirtyCanvas?.(true, true);
   if (notify) node.graph?.change?.();
@@ -1507,7 +1508,7 @@ function syncUnpack(unpack, force = false) {
 
     if (!unpackExpanded(unpack)) {
       const signature = `BUS:${String(pack?.id ?? "")}:${wirelessChannelName(unpack)}`;
-      const targetHeight = BUS_ONLY_WIRELESS_HEIGHT;
+      const targetHeight = busOnlyWirelessHeight(unpack);
       const busOutputReady = (unpack.outputs?.length || 0) === 1
         && String(unpack.outputs?.[0]?.type || "").toUpperCase() === BUS_TYPE
         && unpack.outputs?.[0]?.[BUS_OUTPUT_FIELD] === true;
