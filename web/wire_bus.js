@@ -15,6 +15,7 @@ const PACK_PINNED_LANES_PROPERTY = "terry_wire_bus_pinned_lanes";
 const UNPACK_LANES_PROPERTY = "terry_wire_bus_lane_ids";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
 const UNPACK_OUTPUT_MODE_PROPERTY = "terry_wire_bus_expand_outputs";
+const ADVANCED_INPUTS_EXPANDED_PROPERTY = "terry_wire_bus_advanced_inputs_expanded";
 const UNPACK_SAVED_LINKS_PROPERTY = "terry_wire_bus_saved_output_links";
 const UNPACK_NAMED_OUTPUTS_PROPERTY = "terry_wire_bus_named_outputs";
 const UNPACK_PINNED_OUTPUTS_PROPERTY = "terry_wire_bus_pinned_outputs";
@@ -39,8 +40,11 @@ const WIRELESS_CONTROL_BOTTOM_PADDING = 8;
 const WIRELESS_CONTROL_STYLE_ID = "terry-wireless-bus-control-style";
 
 const OUTPUT_MODE_CONTROL_HEIGHT = 30;
-const OUTPUT_MODE_CONTROL_MARGIN = 4;
 const OUTPUT_MODE_STYLE_ID = "terry-wire-bus-output-mode-style";
+const ADVANCED_INPUTS_HEADER_HEIGHT = 26;
+const ADVANCED_INPUTS_ROW_HEIGHT = 30;
+const ADVANCED_INPUTS_GAP = 4;
+const ADVANCED_INPUTS_MARGIN = 4;
 const BUS_ONLY_WIRELESS_HEIGHT = 140;
 
 const H3_TYPES = new Set(["TerryXuH3PromptEditor"]);
@@ -89,6 +93,8 @@ function labels() {
       input: "输入",
       output: "输出",
       expandOutputs: "散开输出",
+      advancedInputs: "高级输入",
+      portConfig: "端口配置",
     };
   }
   return {
@@ -109,6 +115,8 @@ function labels() {
     input: "Input",
     output: "Output",
     expandOutputs: "Expand outputs",
+    advancedInputs: "Advanced inputs",
+    portConfig: "Port settings",
   };
 }
 
@@ -412,9 +420,6 @@ function installWirelessControlStyle() {
   pointer-events:none;
   transform:rotate(45deg);
 }
-.terry-wireless-channel-control.is-select.has-port-config-button::after{
-  right:36px;
-}
 `;
   document.head.append(style);
 }
@@ -546,70 +551,58 @@ function installOutputModeStyle() {
   const style = document.createElement("style");
   style.id = OUTPUT_MODE_STYLE_ID;
   style.textContent = `
+.terry-bus-advanced-inputs{display:flex;flex-direction:column;gap:0;width:100%;box-sizing:border-box;color:rgba(238,238,238,.9);font:11px/1.2 Inter,system-ui,sans-serif}
+.terry-bus-advanced-toggle{
+  display:flex;align-items:center;gap:7px;width:100%;height:${ADVANCED_INPUTS_HEADER_HEIGHT}px;min-height:${ADVANCED_INPUTS_HEADER_HEIGHT}px;
+  box-sizing:border-box;padding:0 7px;border:1px solid rgba(255,255,255,.13);border-radius:7px;
+  background:rgba(0,0,0,.14);color:rgba(230,234,241,.72);font:11px/1.2 Inter,system-ui,sans-serif;text-align:left;cursor:pointer;
+}
+.terry-bus-advanced-toggle:hover{border-color:rgba(255,255,255,.24);background:rgba(255,255,255,.045);color:#f2f4f7}
+.terry-bus-advanced-chevron{display:inline-flex;align-items:center;justify-content:center;flex:none;width:10px;font-size:13px;line-height:1}
+.terry-bus-advanced-panel{display:none;flex-direction:column;gap:${ADVANCED_INPUTS_GAP}px;padding:4px 2px 0;box-sizing:border-box}
+.terry-bus-advanced-inputs.is-expanded .terry-bus-advanced-panel{display:flex}
+.terry-bus-advanced-row{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:${ADVANCED_INPUTS_ROW_HEIGHT}px;min-height:${ADVANCED_INPUTS_ROW_HEIGHT}px;
+  box-sizing:border-box;padding:0 6px;color:rgba(238,238,238,.88);font:11px/1.2 Inter,system-ui,sans-serif;
+}
+.terry-bus-advanced-row-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.terry-bus-advanced-port-config-slot{display:flex;align-items:center;justify-content:flex-end;flex:none;min-width:28px}
 .terry-bus-output-mode-row{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  width:100%;
-  height:26px;
-  min-height:26px;
-  box-sizing:border-box;
-  padding:0 2px 0 6px;
-  color:rgba(238,238,238,.9);
-  font:11px/1.2 Inter,system-ui,sans-serif;
-  user-select:none;
-  pointer-events:auto;
+  display:flex;align-items:center;justify-content:space-between;width:100%;height:${OUTPUT_MODE_CONTROL_HEIGHT}px;min-height:${OUTPUT_MODE_CONTROL_HEIGHT}px;
+  box-sizing:border-box;padding:0 6px;color:rgba(238,238,238,.9);font:11px/1.2 Inter,system-ui,sans-serif;user-select:none;pointer-events:auto;
 }
-.terry-bus-output-mode-label{
-  min-width:0;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
+.terry-bus-output-mode-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .terry-bus-output-mode-switch{
-  position:relative;
-  display:inline-flex;
-  align-items:center;
-  flex:0 0 auto;
-  width:30px;
-  height:18px;
-  margin-left:8px;
-  padding:0;
-  border:0;
-  border-radius:999px;
-  background:rgba(255,255,255,.16);
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);
-  cursor:pointer;
-  outline:none;
-  transition:background .12s ease, box-shadow .12s ease;
+  position:relative;display:inline-flex;align-items:center;flex:0 0 auto;width:30px;height:18px;margin-left:8px;padding:0;border:0;border-radius:999px;
+  background:rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);cursor:pointer;outline:none;
+  transition:background .12s ease,box-shadow .12s ease;
 }
-.terry-bus-output-mode-switch[data-checked="true"]{
-  background:var(--p-primary-color,#60a5fa);
-}
-.terry-bus-output-mode-switch:focus-visible{
-  box-shadow:0 0 0 2px color-mix(in srgb,var(--p-primary-color,#60a5fa) 45%,transparent);
-}
+.terry-bus-output-mode-switch[data-checked="true"]{background:var(--p-primary-color,#60a5fa)}
+.terry-bus-output-mode-switch:focus-visible{box-shadow:0 0 0 2px color-mix(in srgb,var(--p-primary-color,#60a5fa) 45%,transparent)}
 .terry-bus-output-mode-thumb{
-  position:absolute;
-  left:2px;
-  top:2px;
-  width:14px;
-  height:14px;
-  border-radius:50%;
-  background:#f5f5f5;
-  box-shadow:0 1px 2px rgba(0,0,0,.35);
-  transform:translateX(0);
-  transition:transform .12s ease;
+  position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#f5f5f5;
+  box-shadow:0 1px 2px rgba(0,0,0,.35);transform:translateX(0);transition:transform .12s ease;
 }
-.terry-bus-output-mode-switch[data-checked="true"] .terry-bus-output-mode-thumb{
-  transform:translateX(12px);
-}
+.terry-bus-output-mode-switch[data-checked="true"] .terry-bus-output-mode-thumb{transform:translateX(12px)}
 `;
   document.head.append(style);
 }
 
+function advancedInputsExpanded(node) {
+  return nodeProperties(node)[ADVANCED_INPUTS_EXPANDED_PROPERTY] === true;
+}
+
+function advancedInputsContentHeight(node) {
+  let height = ADVANCED_INPUTS_HEADER_HEIGHT;
+  if (advancedInputsExpanded(node)) {
+    height += ADVANCED_INPUTS_GAP + ADVANCED_INPUTS_ROW_HEIGHT;
+    if (isUnpack(node)) height += ADVANCED_INPUTS_GAP + OUTPUT_MODE_CONTROL_HEIGHT;
+  }
+  return height;
+}
+
 function refreshOutputModeControl(node) {
-  const ui = node?.__terryBusOutputModeControl;
+  const ui = node?.__terryBusAdvancedControl?.outputMode;
   if (!ui) return;
   const value = unpackExpanded(node);
   ui.label.textContent = labels().expandOutputs;
@@ -617,126 +610,142 @@ function refreshOutputModeControl(node) {
   ui.button.setAttribute("aria-checked", String(value));
 }
 
-function saveUnpackExpandedLinks(node) {
-  if (!isUnpack(node) || !unpackExpanded(node)) return;
-  const saved = [];
-  for (let outputIndex = 0; outputIndex < (node.outputs?.length || 0); outputIndex++) {
-    const output = node.outputs[outputIndex];
-    const laneId = output?.[LANE_FIELD];
-    if (!laneId) continue;
-    for (const linkId of output.links || []) {
-      const link = getLink(node.graph, linkId);
-      if (!link) continue;
-      saved.push({
-        laneId,
-        targetId: link.target_id ?? link.targetId,
-        targetSlot: Number(link.target_slot ?? link.targetSlot ?? 0) || 0,
-      });
-    }
-  }
-  nodeProperties(node)[UNPACK_SAVED_LINKS_PROPERTY] = saved;
+function refreshAdvancedInputsControl(node) {
+  const ui = node?.__terryBusAdvancedControl;
+  if (!ui) return;
+  const expanded = advancedInputsExpanded(node);
+  ui.root.classList.toggle("is-expanded", expanded);
+  ui.panel.hidden = !expanded;
+  ui.toggle.setAttribute("aria-expanded", String(expanded));
+  ui.toggle.title = labels().advancedInputs;
+  ui.title.textContent = labels().advancedInputs;
+  ui.chevron.textContent = expanded ? "▾" : "▸";
+  ui.portConfigLabel.textContent = labels().portConfig;
+  if (ui.outputMode) refreshOutputModeControl(node);
 }
 
-function restoreUnpackExpandedLinks(node) {
-  if (!isUnpack(node) || !unpackExpanded(node)) return;
-  const properties = nodeProperties(node);
-  const saved = Array.isArray(properties[UNPACK_SAVED_LINKS_PROPERTY])
-    ? properties[UNPACK_SAVED_LINKS_PROPERTY]
-    : [];
-  if (!saved.length) return;
-
-  for (const item of saved) {
-    const outputIndex = (node.outputs || []).findIndex(
-      (output) => output?.[LANE_FIELD] === item?.laneId
-    );
-    const target = getNode(node.graph, item?.targetId);
-    const targetSlot = Number(item?.targetSlot) || 0;
-    if (outputIndex < 0 || !target?.inputs?.[targetSlot]) continue;
-
-    const alreadyConnected = (node.outputs?.[outputIndex]?.links || []).some((linkId) => {
-      const link = getLink(node.graph, linkId);
-      return String(link?.target_id ?? link?.targetId ?? "") === String(item.targetId)
-        && Number(link?.target_slot ?? link?.targetSlot ?? 0) === targetSlot;
-    });
-    if (!alreadyConnected) node.connect?.(outputIndex, target, targetSlot);
-  }
+function resizeAdvancedInputsNode(node) {
+  const laneCount = isWirelessPack(node)
+    ? Math.max(0, (node.inputs?.length || 0) - 1)
+    : Math.max(0, node.outputs?.length || 0);
+  const pairedPack = isUnpack(node) ? findPackFromUnpack(node) : null;
+  resizeCompactBusNode(node, laneCount, pairedPack);
 }
 
-function setUnpackExpanded(node, value, notify = true) {
-  if (!isUnpack(node)) return;
+function setAdvancedInputsExpanded(node, value, notify = true) {
+  if (!isWireless(node)) return;
   const next = Boolean(value);
   const properties = nodeProperties(node);
-  if (properties[UNPACK_OUTPUT_MODE_PROPERTY] === next) {
-    refreshOutputModeControl(node);
+  if (properties[ADVANCED_INPUTS_EXPANDED_PROPERTY] === next) {
+    refreshAdvancedInputsControl(node);
     return;
   }
-  if (!next && unpackExpanded(node)) saveUnpackExpandedLinks(node);
-  properties[UNPACK_OUTPUT_MODE_PROPERTY] = next;
-  node.__terryBusSignature = null;
-  refreshOutputModeControl(node);
-  syncUnpack(node, true);
-  if (next) restoreUnpackExpandedLinks(node);
-  node.__terryBusRefreshVisual?.();
+  node.graph?.beforeChange?.();
+  properties[ADVANCED_INPUTS_EXPANDED_PROPERTY] = next;
+  refreshAdvancedInputsControl(node);
+  resizeAdvancedInputsNode(node);
+  node.graph?.afterChange?.();
   node.graph?.setDirtyCanvas?.(true, true);
   if (notify) node.graph?.change?.();
 }
 
-function initializeUnpackOutputModeControl(node) {
-  if (!isUnpack(node) || node.__terryBusOutputModeControl) return;
+function initializeAdvancedInputsControl(node) {
+  if (!isWireless(node) || node.__terryBusAdvancedControl) return;
   if (typeof document === "undefined" || typeof node.addDOMWidget !== "function") return;
-  const properties = nodeProperties(node);
-  if (properties[UNPACK_OUTPUT_MODE_PROPERTY] == null) properties[UNPACK_OUTPUT_MODE_PROPERTY] = true;
 
+  const properties = nodeProperties(node);
+  if (isUnpack(node) && properties[UNPACK_OUTPUT_MODE_PROPERTY] == null) {
+    properties[UNPACK_OUTPUT_MODE_PROPERTY] = true;
+  }
   installOutputModeStyle();
 
-  const row = document.createElement("div");
-  row.className = "terry-bus-output-mode-row";
+  const root = document.createElement("div");
+  root.className = "terry-bus-advanced-inputs";
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "terry-bus-advanced-toggle";
+  toggle.setAttribute("aria-expanded", "false");
+  const chevron = document.createElement("span");
+  chevron.className = "terry-bus-advanced-chevron";
+  chevron.textContent = "▸";
+  chevron.setAttribute("aria-hidden", "true");
+  const title = document.createElement("span");
+  toggle.append(chevron, title);
 
-  const label = document.createElement("span");
-  label.className = "terry-bus-output-mode-label";
+  const panel = document.createElement("div");
+  panel.className = "terry-bus-advanced-panel";
 
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "terry-bus-output-mode-switch p-toggleswitch p-component";
-  button.setAttribute("role", "switch");
+  const portConfigRow = document.createElement("div");
+  portConfigRow.className = "terry-bus-advanced-row";
+  const portConfigLabel = document.createElement("span");
+  portConfigLabel.className = "terry-bus-advanced-row-label";
+  const portConfigSlot = document.createElement("div");
+  portConfigSlot.className = "terry-bus-advanced-port-config-slot";
+  portConfigRow.append(portConfigLabel, portConfigSlot);
+  panel.append(portConfigRow);
 
-  const thumb = document.createElement("span");
-  thumb.className = "terry-bus-output-mode-thumb";
-  button.append(thumb);
-  row.append(label, button);
+  let outputMode = null;
+  if (isUnpack(node)) {
+    const row = document.createElement("div");
+    row.className = "terry-bus-output-mode-row";
+    const label = document.createElement("span");
+    label.className = "terry-bus-output-mode-label";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "terry-bus-output-mode-switch p-toggleswitch p-component";
+    button.setAttribute("role", "switch");
+    const thumb = document.createElement("span");
+    thumb.className = "terry-bus-output-mode-thumb";
+    button.append(thumb);
+    row.append(label, button);
+    row.addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setUnpackExpanded(node, !unpackExpanded(node));
+    });
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== " " && event.key !== "Enter") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setUnpackExpanded(node, !unpackExpanded(node));
+    });
+    panel.append(row);
+    outputMode = { row, label, button, thumb };
+  }
 
-  row.addEventListener("pointerdown", (event) => event.stopPropagation());
-  button.addEventListener("click", (event) => {
+  root.append(toggle, panel);
+  root.addEventListener("pointerdown", (event) => event.stopPropagation());
+  root.addEventListener("keydown", (event) => event.stopPropagation());
+  toggle.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    setUnpackExpanded(node, !unpackExpanded(node));
-  });
-  button.addEventListener("keydown", (event) => {
-    if (event.key !== " " && event.key !== "Enter") return;
-    event.preventDefault();
-    event.stopPropagation();
-    setUnpackExpanded(node, !unpackExpanded(node));
+    setAdvancedInputsExpanded(node, !advancedInputsExpanded(node));
   });
 
   const widget = node.addDOMWidget(
-    "terry_bus_expand_outputs_native",
-    "terry_bus_expand_outputs_native",
-    row,
+    "terry_bus_advanced_inputs",
+    "terry_bus_advanced_inputs",
+    root,
     {
       serialize: false,
       hideOnZoom: false,
-      margin: OUTPUT_MODE_CONTROL_MARGIN,
-      getMinHeight: () => OUTPUT_MODE_CONTROL_HEIGHT,
-      getMaxHeight: () => OUTPUT_MODE_CONTROL_HEIGHT,
+      margin: ADVANCED_INPUTS_MARGIN,
+      getMinHeight: () => advancedInputsContentHeight(node),
+      getMaxHeight: () => advancedInputsContentHeight(node),
     }
   );
   if (!widget) {
-    row.remove?.();
+    root.remove?.();
     return;
   }
   widget.serialize = false;
-  node.__terryBusOutputModeControl = { widget, row, label, button, thumb };
-  refreshOutputModeControl(node);
+  widget.computeSize = (width) => [width, advancedInputsContentHeight(node)];
+  node.__terryBusAdvancedControl = {
+    widget, root, toggle, chevron, title, panel,
+    portConfigRow, portConfigLabel, portConfigSlot, outputMode,
+  };
+  refreshAdvancedInputsControl(node);
 }
 
 function variableName(node) {
@@ -1331,14 +1340,20 @@ function compactBusNodeHeight(laneCount) {
 }
 
 function controlBlockHeight(node) {
-  if (isWirelessUnpack(node)) return 40 + OUTPUT_MODE_CONTROL_HEIGHT;
-  if (isWirelessPack(node)) return 40;
-  return 0;
+  if (!isWireless(node)) return 0;
+  return 40 + advancedInputsContentHeight(node) + ADVANCED_INPUTS_MARGIN;
+}
+
+function busOnlyWirelessHeight(node) {
+  return Math.max(
+    BUS_ONLY_WIRELESS_HEIGHT,
+    COMPACT_NODE_HEADER_HEIGHT + controlBlockHeight(node) + 20
+  );
 }
 
 function compactBusNodeMinimumHeight(node, laneCount) {
   if (isUnpack(node) && !unpackExpanded(node)) {
-    return BUS_ONLY_WIRELESS_HEIGHT;
+    return busOnlyWirelessHeight(node);
   }
   const slotHeight = Math.max(16, Number(globalThis.LiteGraph?.NODE_SLOT_HEIGHT) || 20);
   const visibleSlots = Math.max(1, Number(laneCount) || 0) + (isPack(node) ? 1 : 0);
@@ -1359,7 +1374,7 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
 
   const busOnly = isUnpack(node) && !unpackExpanded(node);
   const fixedBusOnlyHeight = busOnly
-    ? BUS_ONLY_WIRELESS_HEIGHT
+    ? busOnlyWirelessHeight(node)
     : 0;
 
   const minHeight = busOnly
@@ -1391,7 +1406,12 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   let pairedHeight = 0;
   if (inheritsPairedHeight) {
     pairedHeight = stableExpandedHeight(pairedPack);
-    if (pairedHeight > 0 && isUnpack(node)) pairedHeight += OUTPUT_MODE_CONTROL_HEIGHT;
+    if (pairedHeight > 0 && isUnpack(node)) {
+      pairedHeight += Math.max(
+        0,
+        advancedInputsContentHeight(node) - advancedInputsContentHeight(pairedPack)
+      );
+    }
     if (pairedHeight > 0) pairedHeight = Math.max(minHeight, pairedHeight);
   }
 
@@ -1468,8 +1488,8 @@ function syncUnpack(unpack, force = false) {
   unpack.__terryBusSyncing = true;
   try {
     localizeFixedPorts(unpack);
-    initializeUnpackOutputModeControl(unpack);
-    refreshOutputModeControl(unpack);
+    initializeAdvancedInputsControl(unpack);
+    refreshAdvancedInputsControl(unpack);
     if (isWirelessUnpack(unpack)) unpack.__terryWirelessControl?.refresh?.();
 
     const pack = findPackFromUnpack(unpack);
@@ -1968,7 +1988,11 @@ function startBridge() {
         if (nodeType(node) === LIST_TYPE) syncBusList(node);
         if (isWireless(node)) {
           initializeWirelessControl(node);
-          if (localeChanged) node.__terryWirelessControl?.refresh?.();
+          initializeAdvancedInputsControl(node);
+          if (localeChanged) {
+            node.__terryWirelessControl?.refresh?.();
+            refreshAdvancedInputsControl(node);
+          }
         }
 
         if (isPack(node)) {
@@ -1978,8 +2002,7 @@ function startBridge() {
         }
 
         if (isUnpack(node)) {
-          initializeUnpackOutputModeControl(node);
-          if (localeChanged) refreshOutputModeControl(node);
+          refreshAdvancedInputsControl(node);
           localizeFixedPorts(node, localeChanged);
           syncUnpack(node);
         }
@@ -2140,7 +2163,7 @@ app.registerExtension({
       this.resizable = true;
 
       if (isWirelessDef) initializeWirelessWidget(this);
-      if (!isPackDef) initializeUnpackOutputModeControl(this);
+      initializeAdvancedInputsControl(this);
 
       localizeFixedPorts(this, true);
 
@@ -2298,7 +2321,7 @@ app.registerExtension({
         if (!isPackDef) refreshWirelessCombo(this);
       }
 
-      if (!isPackDef) initializeUnpackOutputModeControl(this);
+      initializeAdvancedInputsControl(this);
 
       localizeFixedPorts(this, true);
       if (isPackDef) queueMicrotask(() => refreshPackSlots(this));
@@ -2320,7 +2343,7 @@ app.registerExtension({
         if (isTerrySwitch(node)) syncSwitchBusType(node);
         if (isPack(node)) refreshPackSlots(node);
         if (isUnpack(node)) {
-          initializeUnpackOutputModeControl(node);
+          initializeAdvancedInputsControl(node);
           syncUnpack(node, true);
         }
       }
