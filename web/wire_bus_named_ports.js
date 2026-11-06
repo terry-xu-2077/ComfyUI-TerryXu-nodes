@@ -9,6 +9,8 @@ const EMPTY_TYPE = "*";
 const LANE_FIELD = "terry_lane_id";
 const PACK_LANES_PROPERTY = "terry_wire_bus_lanes";
 const PACK_NAMED_LANES_PROPERTY = "terry_wire_bus_named_lanes";
+const UNPACK_NAMED_OUTPUTS_PROPERTY = "terry_wire_bus_named_outputs";
+const UNPACK_MEDIA_OUTPUTS_PROPERTY = "terry_wire_bus_media_outputs";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
 const PENCIL = "✎";
 
@@ -124,8 +126,12 @@ function resolveSource(graph, linkId, seen = new Set()) {
   }
   if (isUnpack(source)) {
     const pack = findPackForUnpack(source);
+    const entries = pack?.__terryBusLaneEntries?.() || [];
+    const mediaOutputMode = isMediaLoader(pack) || entries.some((item) => item?.mediaPack);
     const laneId = source.outputs?.[slot]?.[LANE_FIELD];
-    const entry = pack?.__terryBusLaneEntries?.().find((item) => item?.laneId === laneId);
+    const entry = mediaOutputMode
+      ? entries[slot]
+      : entries.find((item) => item?.laneId === laneId);
     if (entry?.source) return entry.source;
     const input = entry?.input
       || (pack?.inputs || []).find((item) => item?.[LANE_FIELD] === laneId);
@@ -187,15 +193,7 @@ function findPackForUnpack(unpack) {
 }
 
 function namedEntries(pack) {
-  if (isMediaLoader(pack)) {
-    return laneRecords(pack).map((entry) => ({
-      laneId: entry.laneId,
-      base: entry.label,
-      manualName: entry.named ? entry.label : "",
-      label: entry.label,
-      mediaEntry: entry.mediaEntry,
-    }));
-  }
+  if (isMediaLoader(pack)) return [];
   const entries = [];
   const manualNames = manualLaneNames(pack);
   for (const input of pack?.inputs || []) {
@@ -221,24 +219,23 @@ function namedEntries(pack) {
 }
 
 function laneRecords(pack) {
-  const manualNames = manualLaneNames(pack);
   if (isMediaLoader(pack)) {
     return (pack.__terryBusLaneEntries?.() || []).flatMap((mediaEntry, index) => {
       const laneId = String(mediaEntry?.laneId || mediaEntry?.lane?.id || "").trim();
       if (!laneId) return [];
-      const manualName = String(manualNames[laneId] || "").trim();
       const sourceName = stripDecorations(mediaEntry?.name || mediaEntry?.lane?.name || "");
       return [{
         input: null,
         inputIndex: -1,
         laneId,
         ordinal: index + 1,
-        named: Boolean(manualName),
-        label: manualName || sourceName || `${labels().input} ${index + 1}`,
+        named: false,
+        label: sourceName || `${labels().input} ${index + 1}`,
         mediaEntry,
       }];
     });
   }
+  const manualNames = manualLaneNames(pack);
   const stored = Array.isArray(pack?.properties?.[PACK_LANES_PROPERTY])
     ? pack.properties[PACK_LANES_PROPERTY]
     : [];
@@ -303,14 +300,27 @@ function findLaneOwner(pack, laneId, seen = new Set()) {
 function outputRenameEntries(unpack) {
   if (!isUnpack(unpack)) return [];
   const pairedPack = findPackForUnpack(unpack);
-  if (!pairedPack) return [];
+  const mediaOutputMode = isMediaLoader(pairedPack)
+    || unpack.properties?.[UNPACK_MEDIA_OUTPUTS_PROPERTY] === true;
 
+  if (mediaOutputMode) {
+    return (unpack.outputs || []).flatMap((output, outputIndex) => {
+      if (!output || output.type === BUS_TYPE) return [];
+      const label = String(output.label || output.name || `${labels().input} ${outputIndex + 1}`);
+      return [{
+        output,
+        outputIndex,
+        pack: unpack,
+        entry: { label, mediaOutput: true, outputIndex },
+      }];
+    });
+  }
+
+  if (!pairedPack) return [];
   return (unpack.outputs || []).flatMap((output, outputIndex) => {
     const laneId = String(output?.[LANE_FIELD] || "").trim();
     if (!output || !laneId || output.type === BUS_TYPE) return [];
     const owner = findLaneOwner(pairedPack, laneId);
-    // Media Loader names belong to asset IDs, while Bus-Out labels belong to
-    // fixed ordinal ports. Do not make a Bus-Out port inherit an asset name.
     if (!owner || isMediaLoader(owner.pack)) return [];
     const label = stripDecorations(output.label || output.name) || owner.entry.label;
     return [{
@@ -435,8 +445,9 @@ function schedule(node) {
     const pack = findPackForUnpack(node);
     if (pack) applyNames(pack);
     for (const entry of outputRenameEntries(node)) {
-      if (entry.pack !== pack) applyNames(entry.pack);
+      if (entry.pack !== pack && entry.pack !== node) applyNames(entry.pack);
     }
+    syncNodes2OutputLabels(node);
   }, 0);
 }
 
@@ -462,19 +473,53 @@ function requestRename(pack, entry) {
   });
 }
 
+function setMediaOutputName(unpack, outputIndex, value) {
+  const output = unpack?.outputs?.[outputIndex];
+  if (!output || !Number.isInteger(outputIndex) || outputIndex < 0) return false;
+  const next = String(value ?? "").trim();
+  const properties = nodeProperties(unpack);
+  let names = properties[UNPACK_NAMED_OUTPUTS_PROPERTY];
+  if (!names || typeof names !== "object" || Array.isArray(names)) {
+    names = {};
+    properties[UNPACK_NAMED_OUTPUTS_PROPERTY] = names;
+  }
+  if (next) names[String(outputIndex)] = next;
+  else delete names[String(outputIndex)];
+  if (!Object.keys(names).length) delete properties[UNPACK_NAMED_OUTPUTS_PROPERTY];
+
+  const emptyPrefix = String(output.name || output.label || "").match(/^\\[(?:空|Empty)\\]\\s*/i)?.[0] || "";
+  const defaultName = String(output.__terryBusDefaultLabel || stripDecorations(output.name || output.label))
+    || `${labels().input} ${outputIndex + 1}`;
+  output.__terryBusDefaultLabel = defaultName;
+  output.name = next ? `${emptyPrefix}${next}` : `${emptyPrefix}${defaultName}`;
+  output.label = output.name;
+  unpack.graph?.change?.();
+  unpack.graph?.setDirtyCanvas?.(true, true);
+  unpack.setDirtyCanvas?.(true, true);
+  syncNodes2OutputLabels(unpack);
+  return true;
+}
+
+function requestMediaOutputRename(unpack, entry) {
+  void showTextPrompt({
+    title: labels().rename,
+    value: stripDecorations(entry?.entry?.label || ""),
+    inputLabel: labels().rename,
+    placeholder: isChineseLocale() ? "输入端口名称" : "Enter a port name",
+    confirmText: isChineseLocale() ? "保存" : "Save",
+    cancelText: isChineseLocale() ? "取消" : "Cancel",
+  }).then((next) => {
+    if (next == null) return;
+    setMediaOutputName(unpack, entry.outputIndex, next);
+  });
+}
+
 function setLaneName(pack, entry, value) {
   if (!pack || !entry) return;
   const next = String(value ?? "").trim();
   const names = manualLaneNames(pack);
   if (next) names[entry.laneId] = next;
   else delete names[entry.laneId];
-
-  if (isMediaLoader(pack)) {
-    applyNames(pack);
-    pack.graph?.change?.();
-    pack.graph?.setDirtyCanvas?.(true, true);
-    return;
-  }
 
   const stored = (pack.properties?.[PACK_LANES_PROPERTY] || [])
     .find((lane) => lane?.id === entry.laneId);
@@ -598,7 +643,8 @@ function tryRenameOutput(unpack, event, pos) {
     if (point[0] < Math.max(8, width - 165) || point[0] > width - 20) continue;
     event?.preventDefault?.();
     event?.stopPropagation?.();
-    requestRename(entry.pack, entry.entry);
+    if (entry.entry.mediaOutput) requestMediaOutputRename(unpack, entry);
+    else requestRename(entry.pack, entry.entry);
     return true;
   }
   return false;
@@ -733,7 +779,8 @@ function installNodes2RenameHandler() {
     event.preventDefault?.();
     event.stopPropagation?.();
     if (isOutputRow) {
-      requestRename(entry.pack, entry.entry);
+      if (entry.entry.mediaOutput) requestMediaOutputRename(node, entry);
+      else requestRename(entry.pack, entry.entry);
       return;
     }
     if (isDeleteClick) {
