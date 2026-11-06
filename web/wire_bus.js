@@ -1276,9 +1276,18 @@ function compactBusNodeHeight(laneCount) {
   );
 }
 
+function advancedInputsVisible(node) {
+  if (node?.showAdvanced === true) return true;
+  try {
+    return app?.ui?.settings?.getSettingValue?.("Comfy.Node.AlwaysShowAdvancedWidgets") === true;
+  } catch {
+    return false;
+  }
+}
+
 function controlBlockHeight(node) {
   if (!isWireless(node)) return 0;
-  const advancedHeight = node.showAdvanced === true
+  const advancedHeight = advancedInputsVisible(node)
     ? advancedInputsContentHeight(node) + ADVANCED_INPUTS_MARGIN
     : 0;
   return 40 + advancedHeight;
