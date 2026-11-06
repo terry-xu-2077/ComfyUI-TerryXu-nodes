@@ -2089,7 +2089,24 @@ app.registerExtension({
       && !nodeType.prototype.__terryBusToggleAdvancedPatched
     ) {
       nodeType.prototype.toggleAdvanced = function () {
+        const initialized = this.__terryBusLayoutInitialized === true;
+        const previousPreferredHeight = Number(this.__terryBusPreferredHeight) || 0;
+        const previousCustomDelta = initialized && previousPreferredHeight > 0
+          ? (Number(this.size?.[1]) || 0) - previousPreferredHeight
+          : 0;
+        const previousControlHeight = controlBlockHeight(this);
+
         const result = originalToggleAdvanced.apply(this, arguments);
+
+        if (initialized && previousPreferredHeight > 0) {
+          const nextPreferredHeight = previousPreferredHeight
+            + controlBlockHeight(this) - previousControlHeight;
+          this.__terryBusPreferredHeight = nextPreferredHeight;
+          const width = Math.max(COMPACT_NODE_WIDTH, Number(this.size?.[0]) || 0);
+          const height = Math.max(Number(this.__terryBusMinHeight) || 0, nextPreferredHeight + previousCustomDelta);
+          this.setSize?.([width, height]);
+        }
+
         const laneCount = isPackDef
           ? Math.max(0, Number(this.inputs?.length || 0) - 1)
           : Number(this.outputs?.length || 0);
