@@ -1,5 +1,4 @@
 import { app } from "../../scripts/app.js";
-import { showTextPrompt, showConfirm } from "./terry_dialog.js";
 
 const WIRELESS_PACK_TYPE = "TerryXuWirelessBusPack";
 const WIRELESS_UNPACK_TYPE = "TerryXuWirelessBusUnpack";
@@ -9,10 +8,13 @@ const EMPTY_TYPE = "*";
 const LANE_FIELD = "terry_lane_id";
 const PACK_LANES_PROPERTY = "terry_wire_bus_lanes";
 const PACK_NAMED_LANES_PROPERTY = "terry_wire_bus_named_lanes";
+const PACK_PINNED_LANES_PROPERTY = "terry_wire_bus_pinned_lanes";
 const UNPACK_NAMED_OUTPUTS_PROPERTY = "terry_wire_bus_named_outputs";
+const UNPACK_PINNED_OUTPUTS_PROPERTY = "terry_wire_bus_pinned_outputs";
+const UNPACK_PINNED_OUTPUT_TYPES_PROPERTY = "terry_wire_bus_pinned_output_types";
+const UNPACK_PINNED_OUTPUT_DEFAULTS_PROPERTY = "terry_wire_bus_pinned_output_defaults";
 const UNPACK_MEDIA_OUTPUTS_PROPERTY = "terry_wire_bus_media_outputs";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
-const PENCIL = "✎";
 
 function nodeType(node) {
   return String(node?.comfyClass || node?.type || node?.constructor?.comfyClass || node?.constructor?.type || "");
@@ -47,13 +49,21 @@ function labels() {
   return isChineseLocale()
     ? {
         input: "线束",
-        rename: "重命名线束",
-        confirmDelete: (name) => `确定删除线束“${name}”吗？\n\n删除后，该线束的输入连接、总线-出对应端口及其下游连线都会被移除。`,
+        rename: "端口名称",
+        portConfig: "端口配置",
+        fixed: "固定端口",
+        hint: "固定端口始终保留；仅改名不会固定端口，未连接的端口仍会自动清理。",
+        empty: "暂无端口",
+        close: "完成",
       }
     : {
         input: "Lane",
-        rename: "Rename lane",
-        confirmDelete: (name) => `Delete lane “${name}”?\n\nIts input connection, matching Bus-Out port, and downstream links will also be removed.`,
+        rename: "Port name",
+        portConfig: "Port settings",
+        fixed: "Keep port",
+        hint: "Pinned ports stay. Renaming alone does not pin a port; disconnected ports are still cleaned up.",
+        empty: "No ports",
+        close: "Done",
       };
 }
 
@@ -316,12 +326,35 @@ function outputRenameEntries(unpack) {
     });
   }
 
-  if (!pairedPack) return [];
+  if (!pairedPack) {
+    return (unpack.outputs || []).flatMap((output, outputIndex) => {
+      if (!output || output.type === BUS_TYPE) return [];
+      const pinned = unpack.properties?.[UNPACK_PINNED_OUTPUTS_PROPERTY]?.[String(outputIndex)] === true;
+      if (!pinned && !(output.links?.length > 0)) return [];
+      const label = stripDecorations(output.label || output.name) || (labels().input + " " + (outputIndex + 1));
+      return [{
+        output,
+        outputIndex,
+        pack: unpack,
+        entry: { label, mediaOutput: true, outputIndex },
+      }];
+    });
+  }
   return (unpack.outputs || []).flatMap((output, outputIndex) => {
     const laneId = String(output?.[LANE_FIELD] || "").trim();
     if (!output || !laneId || output.type === BUS_TYPE) return [];
     const owner = findLaneOwner(pairedPack, laneId);
-    if (!owner || isMediaLoader(owner.pack)) return [];
+    if (!owner || isMediaLoader(owner.pack)) {
+      const pinned = isUnpackOutputPinned(unpack, outputIndex);
+      if (!pinned && !(output.links?.length > 0)) return [];
+      const label = stripDecorations(output.label || output.name) || (labels().input + " " + (outputIndex + 1));
+      return [{
+        output,
+        outputIndex,
+        pack: unpack,
+        entry: { label, mediaOutput: true, outputIndex },
+      }];
+    }
     const label = stripDecorations(output.label || output.name) || owner.entry.label;
     return [{
       output,
@@ -340,20 +373,11 @@ function syncNodes2OutputLabels(unpack) {
   if (!root) return;
 
   const rows = [...root.querySelectorAll(".lg-slot--output")];
-  const entries = outputRenameEntries(unpack);
   rows.forEach((row, index) => {
-    row.classList.remove("terry-wire-bus-renamable-output");
     const span = row.querySelector(".text-node-component-slot-text");
     const output = unpack.outputs?.[index];
     if (span) span.textContent = String(output?.label || output?.name || "");
   });
-  for (const entry of entries) {
-    const row = rows[entry.outputIndex];
-    if (!row) continue;
-    row.classList.add("terry-wire-bus-renamable-output");
-    const span = row.querySelector(".text-node-component-slot-text");
-    if (span) span.textContent = entry.entry.label;
-  }
 }
 
 function syncNodes2InputLabels(pack) {
@@ -364,14 +388,9 @@ function syncNodes2InputLabels(pack) {
 
   const rows = [...root.querySelectorAll(".lg-slot--input")];
   const entries = laneRecords(pack);
-  rows.forEach((row) => {
-    row.classList.remove("terry-wire-bus-renamable-input", "terry-wire-bus-named-lane");
-  });
   for (const entry of entries) {
     const row = rows[entry.inputIndex];
     if (!row) continue;
-    row.classList.add("terry-wire-bus-renamable-input");
-    row.classList.toggle("terry-wire-bus-named-lane", entry.named);
     const span = row.querySelector(".text-node-component-slot-text");
     if (span) span.textContent = entry.label;
   }
@@ -435,42 +454,37 @@ function applyNames(pack) {
   pack.setDirtyCanvas?.(true, true);
 }
 
-function schedule(node) {
-  setTimeout(() => {
-    if (isPack(node)) {
-      applyNames(node);
-      return;
-    }
-    if (!isUnpack(node)) return;
-    const pack = findPackForUnpack(node);
-    if (pack) applyNames(pack);
-    for (const entry of outputRenameEntries(node)) {
-      if (entry.pack !== pack && entry.pack !== node) applyNames(entry.pack);
-    }
-    syncNodes2OutputLabels(node);
-  }, 0);
+
+let activePortConfigDialog = null;
+
+function isPackLanePinned(pack, laneId) {
+  const pinned = pack?.properties?.[PACK_PINNED_LANES_PROPERTY];
+  return Boolean(pinned && typeof pinned === "object" && pinned[String(laneId)] === true);
 }
 
-function renameEntries(pack) {
-  return isWirelessPack(pack) ? laneRecords(pack) : [];
+function isUnpackOutputPinned(unpack, outputIndex) {
+  const pinned = unpack?.properties?.[UNPACK_PINNED_OUTPUTS_PROPERTY];
+  return Boolean(pinned && typeof pinned === "object" && pinned[String(outputIndex)] === true);
 }
 
-function requestRename(pack, entry) {
-  void showTextPrompt({
-    title: labels().rename,
-    value: entry.label,
-    inputLabel: labels().rename,
-    placeholder: isChineseLocale() ? "输入线束名称" : "Enter a lane name",
-    confirmText: isChineseLocale() ? "保存" : "Save",
-    cancelText: isChineseLocale() ? "取消" : "Cancel",
-  }).then((next) => {
-    const stillExists = isMediaLoader(pack)
-      ? (pack.__terryBusLaneEntries?.() || []).some((lane) => String(lane?.laneId || lane?.lane?.id || "") === entry.laneId)
-      : (pack?.inputs || []).includes(entry.input);
-    if (next == null || !stillExists) return;
-    setLaneName(pack, entry, next);
-    syncNodes2InputLabels(pack);
-  });
+function refreshPackAfterPortEdit(pack, entry) {
+  try {
+    const index = Number.isInteger(entry?.inputIndex)
+      ? entry.inputIndex
+      : (pack?.inputs || []).indexOf(entry?.input);
+    pack?.onConnectionsChange?.(globalThis.LiteGraph?.INPUT ?? 1, index, false, null, entry?.input);
+  } catch {}
+  pack?.graph?.change?.();
+  pack?.graph?.setDirtyCanvas?.(true, true);
+}
+
+function refreshUnpackAfterPortEdit(unpack, outputIndex) {
+  try {
+    unpack?.onConnectionsChange?.(globalThis.LiteGraph?.OUTPUT ?? 2, outputIndex, false, null, unpack?.outputs?.[outputIndex]);
+  } catch {}
+  unpack?.graph?.change?.();
+  unpack?.graph?.setDirtyCanvas?.(true, true);
+  unpack?.setDirtyCanvas?.(true, true);
 }
 
 function setMediaOutputName(unpack, outputIndex, value) {
@@ -487,35 +501,19 @@ function setMediaOutputName(unpack, outputIndex, value) {
   else delete names[String(outputIndex)];
   if (!Object.keys(names).length) delete properties[UNPACK_NAMED_OUTPUTS_PROPERTY];
 
-  const emptyPrefix = String(output.name || output.label || "").match(/^\\[(?:空|Empty)\\]\\s*/i)?.[0] || "";
+  const emptyPrefix = String(output.name || output.label || "").match(/^\[(?:空|Empty)\]\s*/i)?.[0] || "";
   const defaultName = String(output.__terryBusDefaultLabel || stripDecorations(output.name || output.label))
-    || `${labels().input} ${outputIndex + 1}`;
+    || (labels().input + " " + (outputIndex + 1));
   output.__terryBusDefaultLabel = defaultName;
-  output.name = next ? `${emptyPrefix}${next}` : `${emptyPrefix}${defaultName}`;
+  output.name = next ? (emptyPrefix + next) : (emptyPrefix + defaultName);
   output.label = output.name;
-  unpack.graph?.change?.();
-  unpack.graph?.setDirtyCanvas?.(true, true);
-  unpack.setDirtyCanvas?.(true, true);
+  refreshUnpackAfterPortEdit(unpack, outputIndex);
   syncNodes2OutputLabels(unpack);
   return true;
 }
 
-function requestMediaOutputRename(unpack, entry) {
-  void showTextPrompt({
-    title: labels().rename,
-    value: stripDecorations(entry?.entry?.label || ""),
-    inputLabel: labels().rename,
-    placeholder: isChineseLocale() ? "输入端口名称" : "Enter a port name",
-    confirmText: isChineseLocale() ? "保存" : "Save",
-    cancelText: isChineseLocale() ? "取消" : "Cancel",
-  }).then((next) => {
-    if (next == null) return;
-    setMediaOutputName(unpack, entry.outputIndex, next);
-  });
-}
-
 function setLaneName(pack, entry, value) {
-  if (!pack || !entry) return;
+  if (!pack || !entry) return false;
   const next = String(value ?? "").trim();
   const names = manualLaneNames(pack);
   if (next) names[entry.laneId] = next;
@@ -527,177 +525,391 @@ function setLaneName(pack, entry, value) {
     stored.name = next;
     stored.named = Boolean(next);
   }
-  if (next) {
-    entry.input.name = next;
-    entry.input.label = entry.input.link == null
-      ? `${isChineseLocale() ? "[空] " : "[Empty] "}${next}`
-      : next;
-  } else {
-    entry.input.name = "wire";
-    entry.input.label = "wire";
+  if (entry.input) {
+    if (next) {
+      entry.input.name = next;
+      entry.input.label = entry.input.link == null
+        ? ((isChineseLocale() ? "[空] " : "[Empty] ") + next)
+        : next;
+    } else {
+      entry.input.name = "wire";
+      entry.input.label = "wire";
+    }
   }
 
   applyNames(pack);
   syncPackLabels(pack);
-  pack.graph?.change?.();
-  pack.graph?.setDirtyCanvas?.(true, true);
-
-  if (!next) {
-    try {
-      pack.onConnectionsChange?.(globalThis.LiteGraph?.INPUT ?? 1, entry.inputIndex, false, null, entry.input);
-    } catch {}
-  }
-}
-
-function deleteNamedLane(pack, entry) {
-  if (!pack || !entry?.named) return false;
-  void showConfirm({
-    title: isChineseLocale() ? "删除线束" : "Delete lane",
-    message: labels().confirmDelete(entry.label),
-    confirmText: isChineseLocale() ? "删除" : "Delete",
-    cancelText: isChineseLocale() ? "取消" : "Cancel",
-    danger: true,
-  }).then((confirmed) => {
-    if (!confirmed) return;
-    const inputIndex = (pack.inputs || []).indexOf(entry.input);
-    if (inputIndex < 0) return;
-    const names = manualLaneNames(pack);
-    delete names[entry.laneId];
-    const stored = Array.isArray(pack.properties?.[PACK_LANES_PROPERTY])
-      ? pack.properties[PACK_LANES_PROPERTY]
-      : [];
-    nodeProperties(pack)[PACK_LANES_PROPERTY] = stored.filter((lane) => lane?.id !== entry.laneId);
-
-    pack.removeInput?.(inputIndex);
-    try {
-      pack.onConnectionsChange?.(globalThis.LiteGraph?.INPUT ?? 1, inputIndex, false, null, entry.input);
-    } catch {}
-    pack.graph?.change?.();
-    pack.graph?.setDirtyCanvas?.(true, true);
-    schedule(pack);
-  });
+  refreshPackAfterPortEdit(pack, entry);
   return true;
 }
 
-function inputLocalY(node, slot) {
-  const index = (node?.inputs || []).indexOf(slot);
-  if (index < 0) return null;
-  try {
-    const out = [0, 0];
-    const result = node.getConnectionPos?.(true, index, out) || out;
-    if (Array.isArray(result) && Number.isFinite(result[1])) return result[1] - Number(node.pos?.[1] || 0);
-  } catch {}
-  const height = Number(globalThis.LiteGraph?.NODE_SLOT_HEIGHT) || 20;
-  return (Number(globalThis.LiteGraph?.NODE_TITLE_HEIGHT) || 30) + height * (index + 0.5);
-}
-
-function outputLocalY(node, slot) {
-  const index = (node?.outputs || []).indexOf(slot);
-  if (index < 0) return null;
-  try {
-    const out = [0, 0];
-    const result = node.getConnectionPos?.(false, index, out) || out;
-    if (Array.isArray(result) && Number.isFinite(result[1])) return result[1] - Number(node.pos?.[1] || 0);
-  } catch {}
-  const height = Number(globalThis.LiteGraph?.NODE_SLOT_HEIGHT) || 20;
-  return (Number(globalThis.LiteGraph?.NODE_TITLE_HEIGHT) || 30) + height * (index + 0.5);
-}
-
-function localPos(node, event, pos) {
-  if (Array.isArray(pos) && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) return pos;
-  if (Number.isFinite(event?.canvasX) && Number.isFinite(event?.canvasY)) {
-    return [
-      event.canvasX - Number(node.pos?.[0] || 0),
-      event.canvasY - Number(node.pos?.[1] || 0),
-    ];
+function setPackLanePinned(pack, entry, value) {
+  if (!pack || !entry?.laneId) return false;
+  const properties = nodeProperties(pack);
+  let pinned = properties[PACK_PINNED_LANES_PROPERTY];
+  if (!pinned || typeof pinned !== "object" || Array.isArray(pinned)) {
+    pinned = {};
+    properties[PACK_PINNED_LANES_PROPERTY] = pinned;
   }
-  return null;
+  if (value) pinned[entry.laneId] = true;
+  else delete pinned[entry.laneId];
+  if (!Object.keys(pinned).length) delete properties[PACK_PINNED_LANES_PROPERTY];
+  const stored = (properties[PACK_LANES_PROPERTY] || []).find((lane) => lane?.id === entry.laneId);
+  if (stored) stored.pinned = Boolean(value);
+  refreshPackAfterPortEdit(pack, entry);
+  return true;
 }
 
-function tryRenameOrDelete(pack, event, pos) {
-  const point = localPos(pack, event, pos);
-  if (!point) return false;
-  const width = Number(pack.size?.[0]) || 112;
-  for (const entry of renameEntries(pack)) {
-    const y = inputLocalY(pack, entry.input);
-    if (!Number.isFinite(y) || Math.abs(point[1] - y) > 9) continue;
-    if (point[0] < 42 || point[0] > width - 8) continue;
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    if (entry.named && point[0] >= width - 30) {
-      return deleteNamedLane(pack, entry);
+function setUnpackOutputPinned(unpack, outputIndex, value) {
+  if (!unpack || !Number.isInteger(outputIndex) || outputIndex < 0 || !unpack.outputs?.[outputIndex]) return false;
+  const properties = nodeProperties(unpack);
+  let pinned = properties[UNPACK_PINNED_OUTPUTS_PROPERTY];
+  if (!pinned || typeof pinned !== "object" || Array.isArray(pinned)) {
+    pinned = {};
+    properties[UNPACK_PINNED_OUTPUTS_PROPERTY] = pinned;
+  }
+  const output = unpack.outputs?.[outputIndex];
+  if (value) {
+    pinned[String(outputIndex)] = true;
+    let types = properties[UNPACK_PINNED_OUTPUT_TYPES_PROPERTY];
+    if (!types || typeof types !== "object" || Array.isArray(types)) {
+      types = {};
+      properties[UNPACK_PINNED_OUTPUT_TYPES_PROPERTY] = types;
     }
-    requestRename(pack, entry);
-    return true;
+    types[String(outputIndex)] = String(output?.type || EMPTY_TYPE);
+    let defaults = properties[UNPACK_PINNED_OUTPUT_DEFAULTS_PROPERTY];
+    if (!defaults || typeof defaults !== "object" || Array.isArray(defaults)) {
+      defaults = {};
+      properties[UNPACK_PINNED_OUTPUT_DEFAULTS_PROPERTY] = defaults;
+    }
+    defaults[String(outputIndex)] = String(output?.__terryBusDefaultLabel || stripDecorations(output?.name || output?.label) || (labels().input + " " + (outputIndex + 1)));
+  } else {
+    delete pinned[String(outputIndex)];
+    if (!Object.keys(pinned).length) delete properties[UNPACK_PINNED_OUTPUTS_PROPERTY];
+    const types = properties[UNPACK_PINNED_OUTPUT_TYPES_PROPERTY];
+    if (types && typeof types === "object") {
+      delete types[String(outputIndex)];
+      if (!Object.keys(types).length) delete properties[UNPACK_PINNED_OUTPUT_TYPES_PROPERTY];
+    }
+    const defaults = properties[UNPACK_PINNED_OUTPUT_DEFAULTS_PROPERTY];
+    if (defaults && typeof defaults === "object") {
+      delete defaults[String(outputIndex)];
+      if (!Object.keys(defaults).length) delete properties[UNPACK_PINNED_OUTPUT_DEFAULTS_PROPERTY];
+    }
   }
-  return false;
+  const sourcePack = findPackForUnpack(unpack);
+  const owner = output?.[LANE_FIELD] ? findLaneOwner(sourcePack, output[LANE_FIELD]) : null;
+  refreshUnpackAfterPortEdit(unpack, outputIndex);
+  if (owner?.pack && owner.entry) refreshPackAfterPortEdit(owner.pack, owner.entry);
+  return true;
 }
 
-function tryRenameOutput(unpack, event, pos) {
-  const point = localPos(unpack, event, pos);
-  if (!point) return false;
-  const width = Number(unpack.size?.[0]) || 180;
-  for (const entry of outputRenameEntries(unpack)) {
-    const y = outputLocalY(unpack, entry.output);
-    if (!Number.isFinite(y) || Math.abs(point[1] - y) > 9) continue;
-    if (point[0] < Math.max(8, width - 165) || point[0] > width - 20) continue;
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    if (entry.entry.mediaOutput) requestMediaOutputRename(unpack, entry);
-    else requestRename(entry.pack, entry.entry);
-    return true;
-  }
-  return false;
+function renameEntries(pack) {
+  return isWirelessPack(pack) ? laneRecords(pack) : [];
 }
 
-function installNamedLaneStyle() {
-  if (typeof document === "undefined" || document.getElementById("terry-wire-bus-named-lane-style")) return;
+function portConfigEntries(node) {
+  if (isWirelessPack(node)) {
+    return renameEntries(node).map((entry) => ({
+      direction: "input",
+      index: entry.ordinal - 1,
+      label: stripDecorations(entry.label) || (labels().input + " " + entry.ordinal),
+      type: String(entry.input?.type || EMPTY_TYPE),
+      pinned: isPackLanePinned(node, entry.laneId),
+      pack: node,
+      entry,
+    }));
+  }
+  if (isUnpack(node)) {
+    return outputRenameEntries(node).map((item) => ({
+      direction: "output",
+      index: item.outputIndex,
+      label: stripDecorations(item.entry.label) || (labels().input + " " + (item.outputIndex + 1)),
+      type: String(item.output?.type || EMPTY_TYPE),
+      pinned: isUnpackOutputPinned(node, item.outputIndex),
+      pack: item.pack,
+      entry: item.entry,
+      output: item.output,
+      mediaOutput: Boolean(item.entry.mediaOutput),
+      outputIndex: item.outputIndex,
+    }));
+  }
+  return [];
+}
+
+function savePortName(node, item, value) {
+  if (item.direction === "input") {
+    setLaneName(item.pack || node, item.entry, value);
+  } else if (item.mediaOutput || item.pack === node) {
+    setMediaOutputName(node, item.outputIndex, value);
+  } else {
+    setLaneName(item.pack, item.entry, value);
+  }
+}
+
+function setPortPinned(node, item, value) {
+  if (item.direction === "input") setPackLanePinned(item.pack || node, item.entry, value);
+  else setUnpackOutputPinned(node, item.outputIndex, value);
+}
+
+function installPortConfigStyle() {
+  if (typeof document === "undefined" || document.getElementById("terry-wire-bus-port-config-style")) return;
   const style = document.createElement("style");
-  style.id = "terry-wire-bus-named-lane-style";
+  style.id = "terry-wire-bus-port-config-style";
   style.textContent = `
-.lg-slot--input.terry-wire-bus-renamable-input{
-  position:relative;
+.terry-wire-bus-port-config-button{
+  display:grid;place-items:center;flex:0 0 28px;width:28px;height:24px;
+  margin:0 2px 0 0;padding:0;border:0;border-left:1px solid rgba(255,255,255,.14);
+  border-radius:0;background:transparent;color:rgba(230,234,241,.68);
+  font:16px/1 system-ui;cursor:pointer;pointer-events:auto;
 }
-.lg-slot--input.terry-wire-bus-named-lane{
-  padding-right:26px;
+.terry-wire-bus-port-config-button:hover,
+.terry-wire-bus-port-config-button:focus-visible{
+  color:#f4f6fa;background:rgba(255,255,255,.08);outline:none;
 }
-.lg-slot--input.terry-wire-bus-renamable-input .text-node-component-slot-text,
-.lg-slot--output.terry-wire-bus-renamable-output .text-node-component-slot-text{
-  cursor:text;
+.terry-wire-bus-port-config-overlay{
+  position:fixed;inset:0;z-index:10020;display:flex;align-items:center;justify-content:center;
+  padding:20px;box-sizing:border-box;background:rgba(0,0,0,.58);pointer-events:auto;
 }
-.lg-slot--input.terry-wire-bus-renamable-input .text-node-component-slot-text::after,
-.lg-slot--output.terry-wire-bus-renamable-output .text-node-component-slot-text::after{
-  content:"${PENCIL}";
-  display:inline-block;
-  margin-left:9px;
-  color:rgba(220,224,230,.78);
-  opacity:0;
-  transition:opacity .12s ease;
-  pointer-events:none;
+.terry-wire-bus-port-config-dialog{
+  display:flex;flex-direction:column;gap:12px;width:min(440px,calc(100vw - 32px));
+  max-height:min(620px,calc(100vh - 40px));padding:16px;box-sizing:border-box;
+  border:1px solid rgba(255,255,255,.14);border-radius:12px;
+  background:#202328;color:#e7eaf0;box-shadow:0 18px 56px rgba(0,0,0,.48);
+  font:13px/1.45 Inter,system-ui,sans-serif;
 }
-.lg-slot--input.terry-wire-bus-renamable-input .text-node-component-slot-text:hover::after,
-.lg-slot--output.terry-wire-bus-renamable-output .text-node-component-slot-text:hover::after{
-  opacity:1;
+.terry-wire-bus-port-config-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.terry-wire-bus-port-config-title{font-size:15px;font-weight:650}
+.terry-wire-bus-port-config-close{
+  width:28px;height:28px;border:0;border-radius:7px;background:transparent;
+  color:#aeb6c2;font-size:20px;cursor:pointer;
 }
-.lg-slot--input.terry-wire-bus-named-lane::after{
-  content:"×";
-  position:absolute;
-  right:7px;
-  top:50%;
-  transform:translateY(-50%);
-  color:#e16b6b;
-  font-size:17px;
-  font-weight:600;
-  line-height:1;
-  opacity:0;
-  transition:opacity .12s ease;
-  pointer-events:none;
+.terry-wire-bus-port-config-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.terry-wire-bus-port-config-hint{margin:0;color:#aab2bf;font-size:12px}
+.terry-wire-bus-port-config-list{display:flex;flex-direction:column;gap:7px;min-height:0;overflow:auto;padding:1px 3px 1px 1px}
+.terry-wire-bus-port-config-row{
+  display:grid;grid-template-columns:28px minmax(0,1fr) 36px;align-items:center;gap:8px;
+  min-height:42px;padding:6px 8px;border:1px solid rgba(255,255,255,.09);
+  border-radius:8px;background:rgba(255,255,255,.025);
 }
-.lg-slot--input.terry-wire-bus-named-lane.terry-wire-bus-port-actions-visible::after{
-  opacity:1;
+.terry-wire-bus-port-config-index{color:#8792a2;font-size:11px;font-variant-numeric:tabular-nums;text-align:center}
+.terry-wire-bus-port-config-main{display:flex;align-items:center;gap:8px;min-width:0}
+.terry-wire-bus-port-config-type{
+  flex:none;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:#aabbd2;font-size:10px;
 }
+.terry-wire-bus-port-config-name{
+  flex:1;min-width:0;height:30px;padding:0 8px;border:1px solid #454c57;border-radius:6px;
+  outline:none;background:#171a1f;color:#e9edf3;font:12px Inter,system-ui,sans-serif;
+}
+.terry-wire-bus-port-config-name:focus{border-color:#799ac4;box-shadow:0 0 0 1px rgba(121,154,196,.2)}
+.terry-wire-bus-port-config-pin{
+  display:grid;place-items:center;width:32px;height:30px;padding:0;border:1px solid #424954;
+  border-radius:7px;background:transparent;color:#788291;font-size:16px;cursor:pointer;
+}
+.terry-wire-bus-port-config-pin:hover{border-color:#8aa6cb;color:#cbdcf3}
+.terry-wire-bus-port-config-pin.is-pinned{
+  border-color:#7e9fc8;background:rgba(113,151,199,.16);color:#d8e8ff;
+}
+.terry-wire-bus-port-config-empty{padding:24px 8px;color:#8f98a6;text-align:center}
+.terry-wire-bus-port-config-foot{display:flex;justify-content:flex-end}
+.terry-wire-bus-port-config-done{
+  min-width:84px;height:32px;padding:0 14px;border:1px solid #596372;border-radius:7px;
+  background:#303640;color:#edf1f6;font:12px Inter,system-ui,sans-serif;cursor:pointer;
+}
+.terry-wire-bus-port-config-done:hover{background:#3a4350;border-color:#7e91aa}
 `;
   document.head.append(style);
+}
+
+function closePortConfigDialog() {
+  if (!activePortConfigDialog) return;
+  const { overlay, onKeyDown } = activePortConfigDialog;
+  document.removeEventListener("keydown", onKeyDown, true);
+  overlay.remove();
+  activePortConfigDialog = null;
+}
+
+function openPortConfig(node) {
+  if (typeof document === "undefined" || !document.body) return;
+  closePortConfigDialog();
+  installPortConfigStyle();
+
+  const text = labels();
+  const overlay = document.createElement("div");
+  overlay.className = "terry-wire-bus-port-config-overlay";
+  const dialog = document.createElement("section");
+  dialog.className = "terry-wire-bus-port-config-dialog";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-label", text.portConfig);
+
+  const head = document.createElement("div");
+  head.className = "terry-wire-bus-port-config-head";
+  const title = document.createElement("div");
+  title.className = "terry-wire-bus-port-config-title";
+  title.textContent = text.portConfig;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "terry-wire-bus-port-config-close";
+  close.textContent = "×";
+  close.title = text.close;
+  close.addEventListener("click", closePortConfigDialog);
+  head.append(title, close);
+
+  const hint = document.createElement("p");
+  hint.className = "terry-wire-bus-port-config-hint";
+  hint.textContent = text.hint;
+  const list = document.createElement("div");
+  list.className = "terry-wire-bus-port-config-list";
+  const foot = document.createElement("div");
+  foot.className = "terry-wire-bus-port-config-foot";
+  const done = document.createElement("button");
+  done.type = "button";
+  done.className = "terry-wire-bus-port-config-done";
+  done.textContent = text.close;
+  done.addEventListener("click", closePortConfigDialog);
+  foot.append(done);
+  dialog.append(head, hint, list, foot);
+  overlay.append(dialog);
+
+  const render = () => {
+    list.replaceChildren();
+    const entries = portConfigEntries(node);
+    if (!entries.length) {
+      const empty = document.createElement("div");
+      empty.className = "terry-wire-bus-port-config-empty";
+      empty.textContent = text.empty;
+      list.append(empty);
+      return;
+    }
+
+    entries.forEach((item, index) => {
+      const row = document.createElement("div");
+      row.className = "terry-wire-bus-port-config-row";
+      const ordinal = document.createElement("span");
+      ordinal.className = "terry-wire-bus-port-config-index";
+      ordinal.textContent = String(index + 1).padStart(2, "0");
+
+      const main = document.createElement("div");
+      main.className = "terry-wire-bus-port-config-main";
+      const type = document.createElement("span");
+      type.className = "terry-wire-bus-port-config-type";
+      type.textContent = item.type === EMPTY_TYPE ? "空槽" : item.type;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "terry-wire-bus-port-config-name";
+      input.value = item.label;
+      input.placeholder = text.rename;
+      input.setAttribute("aria-label", text.rename + " " + (index + 1));
+      input.addEventListener("change", () => {
+        if (input.value.trim() === item.label) return;
+        savePortName(node, item, input.value);
+        setTimeout(render, 0);
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        input.blur();
+      });
+      main.append(type, input);
+
+      const pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = "terry-wire-bus-port-config-pin" + (item.pinned ? " is-pinned" : "");
+      pin.textContent = "📌";
+      pin.title = text.fixed;
+      pin.setAttribute("aria-label", text.fixed + " " + (index + 1));
+      pin.setAttribute("aria-pressed", String(item.pinned));
+      let preparedPinClick = false;
+      const prepareNameBeforePin = () => {
+        const nextName = input.value.trim();
+        if (nextName === item.label) return false;
+        if (!item.pinned) {
+          setPortPinned(node, item, true);
+          item.pinned = true;
+          preparedPinClick = true;
+        }
+        savePortName(node, item, nextName);
+        item.label = nextName;
+        return true;
+      };
+      pin.addEventListener("pointerdown", prepareNameBeforePin);
+      pin.addEventListener("click", () => {
+        if (preparedPinClick) {
+          preparedPinClick = false;
+          render();
+          return;
+        }
+        if (input.value.trim() !== item.label) prepareNameBeforePin();
+        if (preparedPinClick) {
+          preparedPinClick = false;
+          render();
+          return;
+        }
+        setPortPinned(node, item, !item.pinned);
+        render();
+      });
+
+      row.append(ordinal, main, pin);
+      list.append(row);
+    });
+  };
+
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePortConfigDialog();
+    }
+  };
+  overlay.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    if (event.target === overlay) closePortConfigDialog();
+  });
+  dialog.addEventListener("pointerdown", (event) => event.stopPropagation());
+  document.addEventListener("keydown", onKeyDown, true);
+  activePortConfigDialog = { overlay, onKeyDown };
+  document.body.append(overlay);
+  render();
+  close.focus?.();
+}
+
+function ensurePortConfigButton(node) {
+  if (!isWirelessPack(node) && !isUnpack(node)) return;
+  const root = node?.__terryWirelessControl?.root;
+  if (!root || root.querySelector?.(".terry-wire-bus-port-config-button")) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "terry-wire-bus-port-config-button";
+  button.textContent = "⚙";
+  button.title = labels().portConfig;
+  button.setAttribute("aria-label", labels().portConfig);
+  button.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+  });
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openPortConfig(node);
+  });
+  root.append(button);
+}
+
+function schedule(node) {
+  setTimeout(() => {
+    if (isWirelessPack(node) || isUnpack(node)) ensurePortConfigButton(node);
+    if (isPack(node)) {
+      applyNames(node);
+      return;
+    }
+    if (!isUnpack(node)) return;
+    const pack = findPackForUnpack(node);
+    if (pack) applyNames(pack);
+    for (const entry of outputRenameEntries(node)) {
+      if (entry.pack !== pack && entry.pack !== node) applyNames(entry.pack);
+    }
+    syncNodes2OutputLabels(node);
+  }, 0);
 }
 
 function allGraphs(root = app.graph) {
@@ -724,81 +936,8 @@ function allNodes() {
   return allGraphs().flatMap((graph) => graph?._nodes || graph?.nodes || []);
 }
 
-function installNodes2RenameHandler() {
-  if (typeof document === "undefined" || globalThis.__terryWireBusNodes2RenameHandler) return;
-  globalThis.__terryWireBusNodes2RenameHandler = true;
-  document.addEventListener("pointerover", (event) => {
-    const span = event.target?.closest?.(".text-node-component-slot-text");
-    const row = span?.closest?.(".lg-slot--input.terry-wire-bus-named-lane");
-    row?.classList.add("terry-wire-bus-port-actions-visible");
-  });
-  document.addEventListener("pointerout", (event) => {
-    const row = event.target?.closest?.(".lg-slot--input.terry-wire-bus-named-lane");
-    if (!row || row.contains(event.relatedTarget)) return;
-    row.classList.remove("terry-wire-bus-port-actions-visible");
-  });
-
-  document.addEventListener("pointerdown", (event) => {
-    if (event.button != null && event.button !== 0) return;
-    const target = event.target;
-    if (!target?.closest) return;
-    if (target.closest('[data-testid="slot-connection-dot"], [data-testid="slot-dot"]')) return;
-    const inputRow = target.closest(".lg-slot--input");
-    const outputRow = target.closest(".lg-slot--output");
-    const row = inputRow || outputRow;
-    const root = row?.closest?.("[data-node-id]");
-    if (!row || !root) return;
-    const span = row.querySelector(".text-node-component-slot-text");
-    if (!span) return;
-
-    const isOutputRow = Boolean(outputRow);
-    const node = allNodes().find((item) =>
-      (isOutputRow ? isUnpack(item) : isPack(item))
-      && String(item?.id) === String(root.getAttribute("data-node-id"))
-    );
-    if (!node) return;
-
-    const rowRect = row.getBoundingClientRect?.();
-    const isDeleteClick = !isOutputRow
-      && row.classList.contains("terry-wire-bus-named-lane")
-      && rowRect
-      && Number.isFinite(event.clientX)
-      && event.clientX >= rowRect.right - 28;
-    const isLabelClick = target === span || span.contains(target);
-    if (!isLabelClick && !isDeleteClick) return;
-
-    const selector = isOutputRow ? ".lg-slot--output" : ".lg-slot--input";
-    const rows = [...root.querySelectorAll(selector)];
-    const rowIndex = rows.indexOf(row);
-    const entries = isOutputRow ? outputRenameEntries(node) : renameEntries(node);
-    const entry = isOutputRow
-      ? entries.find((item) => item.outputIndex === rowIndex)
-      : entries.find((item) => item.inputIndex === rowIndex);
-    if (!entry) return;
-
-    event.preventDefault?.();
-    event.stopPropagation?.();
-    if (isOutputRow) {
-      if (entry.entry.mediaOutput) requestMediaOutputRename(node, entry);
-      else requestRename(entry.pack, entry.entry);
-      return;
-    }
-    if (isDeleteClick) {
-      deleteNamedLane(node, entry);
-      return;
-    }
-    requestRename(node, entry);
-  }, true);
-}
-
 function patchPackNodeType(nodeTypeClass, nodeData) {
   if (nodeData?.name !== WIRELESS_PACK_TYPE) return;
-
-  const oldMouse = nodeTypeClass.prototype.onMouseDown;
-  nodeTypeClass.prototype.onMouseDown = function (event, pos) {
-    if (tryRenameOrDelete(this, event, pos)) return true;
-    return oldMouse?.apply(this, arguments);
-  };
 
   for (const hook of ["onNodeCreated", "onConfigure", "onConnectionsChange"]) {
     const original = nodeTypeClass.prototype[hook];
@@ -810,14 +949,6 @@ function patchPackNodeType(nodeTypeClass, nodeData) {
   }
 }
 
-function patchUnpackNodeType(nodeTypeClass) {
-  const oldMouse = nodeTypeClass.prototype.onMouseDown;
-  nodeTypeClass.prototype.onMouseDown = function (event, pos) {
-    if (tryRenameOutput(this, event, pos)) return true;
-    return oldMouse?.apply(this, arguments);
-  };
-}
-
 app.registerExtension({
   name: "TerryXu.WireBusNamedPorts",
 
@@ -826,7 +957,6 @@ app.registerExtension({
     if (nodeData?.name === WIRELESS_PACK_TYPE) patchPackNodeType(nodeType, nodeData);
 
     if (nodeData?.name === WIRELESS_UNPACK_TYPE) {
-      patchUnpackNodeType(nodeType);
       const oldConnections = nodeType.prototype.onConnectionsChange;
       nodeType.prototype.onConnectionsChange = function () {
         const result = oldConnections?.apply(this, arguments);
@@ -847,8 +977,7 @@ app.registerExtension({
   loadedGraphNode(node) { schedule(node); },
 
   setup() {
-    installNamedLaneStyle();
-    installNodes2RenameHandler();
+    installPortConfigStyle();
   },
 
   afterConfigureGraph() {
