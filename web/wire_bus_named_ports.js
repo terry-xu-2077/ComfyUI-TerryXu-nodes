@@ -309,7 +309,9 @@ function outputRenameEntries(unpack) {
     const laneId = String(output?.[LANE_FIELD] || "").trim();
     if (!output || !laneId || output.type === BUS_TYPE) return [];
     const owner = findLaneOwner(pairedPack, laneId);
-    if (!owner) return [];
+    // Media Loader names belong to asset IDs, while Bus-Out labels belong to
+    // fixed ordinal ports. Do not make a Bus-Out port inherit an asset name.
+    if (!owner || isMediaLoader(owner.pack)) return [];
     const label = stripDecorations(output.label || output.name) || owner.entry.label;
     return [{
       output,
@@ -400,7 +402,7 @@ function applyNames(pack) {
       const laneId = String(output?.[LANE_FIELD] || "").trim();
       if (!laneId || output.type === BUS_TYPE) continue;
       const owner = findLaneOwner(findPackForUnpack(node), laneId);
-      if (owner?.pack !== pack) continue;
+      if (owner?.pack !== pack || isMediaLoader(pack)) continue;
 
       const connectedEntry = entries.find((item) => item.laneId === laneId);
       const storedEntry = records.find((item) => item.laneId === laneId);
