@@ -530,6 +530,10 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
   pack.showAdvanced = false;
   alwaysShowAdvanced = true;
   assert.equal(context.busTest.controlBlockHeight(pack), 74);
+  assert.equal(context.busTest.nativeAdvancedFooterReserveHeight(pack), 0);
+  pack.showAdvanced = true;
+  assert.equal(context.busTest.nativeAdvancedFooterReserveHeight(pack), 36);
+  pack.showAdvanced = false;
   alwaysShowAdvanced = false;
 
   // The native footer calls node.toggleAdvanced(). Bus nodes recalculate their
@@ -560,15 +564,15 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
     expandToFitContent() { this.setSize(this.computeSize()); },
   });
   busNode.toggleAdvanced();
-  assert.deepEqual(busNode.size, [180, 170]);
+  assert.deepEqual(busNode.size, [180, 206]);
   assert.equal(busNode.widgets_start_y, 96);
   busNode.toggleAdvanced();
-  assert.deepEqual(busNode.size, [180, 136]);
-  busNode.setSize([180, 156]);
+  assert.deepEqual(busNode.size, [180, 172]);
+  busNode.setSize([180, 192]);
   busNode.toggleAdvanced();
-  assert.deepEqual(busNode.size, [180, 190]);
+  assert.deepEqual(busNode.size, [180, 226]);
   busNode.toggleAdvanced();
-  assert.deepEqual(busNode.size, [180, 156]);
+  assert.deepEqual(busNode.size, [180, 192]);
 });
 
 test("port pin icon is a vector outline that can be filled for the pinned state", async () => {
