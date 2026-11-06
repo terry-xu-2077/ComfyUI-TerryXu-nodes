@@ -403,8 +403,7 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
   assert.match(wire, /widget\.options\.advanced = true/);
   assert.match(wire, /widget\.advanced = true/);
   assert.match(wire, /node\.showAdvanced === true/);
-  assert.doesNotMatch(wire, /terry_wire_bus_advanced_inputs_expanded/);
-  assert.doesNotMatch(wire, /terry-bus-advanced-toggle|terry-bus-advanced-panel/);
+  assert.doesNotMatch(wire, /ADVANCED_INPUTS_EXPANDED_PROPERTY|terry-bus-advanced-toggle|terry-bus-advanced-panel/);
   assert.match(named, /node\?\.__terryBusAdvancedControl\?\.portConfigSlot/);
 
   class Element {
@@ -455,7 +454,9 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
   });
 
   const pack = makeNode("TerryXuWirelessBusPack", [{ name: "wire", link: null }], [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }]);
+  pack.properties.terry_wire_bus_advanced_inputs_expanded = true;
   context.busTest.initializeAdvancedInputsControl(pack);
+  assert.equal("terry_wire_bus_advanced_inputs_expanded" in pack.properties, false);
   assert.equal(pack.__terryBusAdvancedControl.widget.options.advanced, true);
   assert.equal(pack.__terryBusAdvancedControl.widget.advanced, true);
   assert.equal(pack.domWidget.root.children.length, 1);
