@@ -15,7 +15,6 @@ const PACK_PINNED_LANES_PROPERTY = "terry_wire_bus_pinned_lanes";
 const UNPACK_LANES_PROPERTY = "terry_wire_bus_lane_ids";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
 const UNPACK_OUTPUT_MODE_PROPERTY = "terry_wire_bus_expand_outputs";
-const ADVANCED_INPUTS_EXPANDED_PROPERTY = "terry_wire_bus_advanced_inputs_expanded";
 const UNPACK_SAVED_LINKS_PROPERTY = "terry_wire_bus_saved_output_links";
 const UNPACK_NAMED_OUTPUTS_PROPERTY = "terry_wire_bus_named_outputs";
 const UNPACK_PINNED_OUTPUTS_PROPERTY = "terry_wire_bus_pinned_outputs";
@@ -39,7 +38,6 @@ const WIRELESS_CONTROL_STYLE_ID = "terry-wireless-bus-control-style";
 
 const OUTPUT_MODE_CONTROL_HEIGHT = 30;
 const OUTPUT_MODE_STYLE_ID = "terry-wire-bus-output-mode-style";
-const ADVANCED_INPUTS_HEADER_HEIGHT = 26;
 const ADVANCED_INPUTS_ROW_HEIGHT = 30;
 const ADVANCED_INPUTS_GAP = 4;
 const ADVANCED_INPUTS_MARGIN = 4;
@@ -549,16 +547,7 @@ function installOutputModeStyle() {
   const style = document.createElement("style");
   style.id = OUTPUT_MODE_STYLE_ID;
   style.textContent = `
-.terry-bus-advanced-inputs{display:flex;flex-direction:column;gap:0;width:100%;box-sizing:border-box;color:rgba(238,238,238,.9);font:11px/1.2 Inter,system-ui,sans-serif}
-.terry-bus-advanced-toggle{
-  display:flex;align-items:center;gap:7px;width:100%;height:${ADVANCED_INPUTS_HEADER_HEIGHT}px;min-height:${ADVANCED_INPUTS_HEADER_HEIGHT}px;
-  box-sizing:border-box;padding:0 7px;border:1px solid rgba(255,255,255,.13);border-radius:7px;
-  background:rgba(0,0,0,.14);color:rgba(230,234,241,.72);font:11px/1.2 Inter,system-ui,sans-serif;text-align:left;cursor:pointer;
-}
-.terry-bus-advanced-toggle:hover{border-color:rgba(255,255,255,.24);background:rgba(255,255,255,.045);color:#f2f4f7}
-.terry-bus-advanced-chevron{display:inline-flex;align-items:center;justify-content:center;flex:none;width:10px;font-size:13px;line-height:1}
-.terry-bus-advanced-panel{display:none;flex-direction:column;gap:${ADVANCED_INPUTS_GAP}px;padding:4px 2px 0;box-sizing:border-box}
-.terry-bus-advanced-inputs.is-expanded .terry-bus-advanced-panel{display:flex}
+.terry-bus-advanced-inputs{display:flex;flex-direction:column;gap:${ADVANCED_INPUTS_GAP}px;width:100%;box-sizing:border-box;color:rgba(238,238,238,.9);font:11px/1.2 Inter,system-ui,sans-serif}
 .terry-bus-advanced-row{
   display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:${ADVANCED_INPUTS_ROW_HEIGHT}px;min-height:${ADVANCED_INPUTS_ROW_HEIGHT}px;
   box-sizing:border-box;padding:0 6px;color:rgba(238,238,238,.88);font:11px/1.2 Inter,system-ui,sans-serif;
@@ -586,17 +575,10 @@ function installOutputModeStyle() {
   document.head.append(style);
 }
 
-function advancedInputsExpanded(node) {
-  return nodeProperties(node)[ADVANCED_INPUTS_EXPANDED_PROPERTY] === true;
-}
-
 function advancedInputsContentHeight(node) {
-  let height = ADVANCED_INPUTS_HEADER_HEIGHT;
-  if (advancedInputsExpanded(node)) {
-    height += ADVANCED_INPUTS_GAP + ADVANCED_INPUTS_ROW_HEIGHT;
-    if (isUnpack(node)) height += ADVANCED_INPUTS_GAP + OUTPUT_MODE_CONTROL_HEIGHT;
-  }
-  return height;
+  return ADVANCED_INPUTS_ROW_HEIGHT + (
+    isUnpack(node) ? ADVANCED_INPUTS_GAP + OUTPUT_MODE_CONTROL_HEIGHT : 0
+  );
 }
 
 function refreshOutputModeControl(node) {
@@ -611,41 +593,8 @@ function refreshOutputModeControl(node) {
 function refreshAdvancedInputsControl(node) {
   const ui = node?.__terryBusAdvancedControl;
   if (!ui) return;
-  const expanded = advancedInputsExpanded(node);
-  ui.root.classList.toggle("is-expanded", expanded);
-  ui.panel.hidden = !expanded;
-  ui.toggle.setAttribute("aria-expanded", String(expanded));
-  ui.toggle.title = labels().advancedInputs;
-  ui.title.textContent = labels().advancedInputs;
-  ui.chevron.textContent = expanded ? "▾" : "▸";
   ui.portConfigLabel.textContent = labels().portConfig;
   if (ui.outputMode) refreshOutputModeControl(node);
-}
-
-function resizeAdvancedInputsNode(node) {
-  const laneCount = isWirelessPack(node)
-    ? Math.max(0, (node.inputs?.length || 0) - 1)
-    : Math.max(0, node.outputs?.length || 0);
-  const pairedPack = isUnpack(node) ? findPackFromUnpack(node) : null;
-  resizeCompactBusNode(node, laneCount, pairedPack);
-}
-
-function setAdvancedInputsExpanded(node, value, notify = true) {
-  if (!isWireless(node)) return;
-  const next = Boolean(value);
-  const properties = nodeProperties(node);
-  if (properties[ADVANCED_INPUTS_EXPANDED_PROPERTY] === next) {
-    refreshAdvancedInputsControl(node);
-    return;
-  }
-  node.graph?.beforeChange?.();
-  properties[ADVANCED_INPUTS_EXPANDED_PROPERTY] = next;
-  refreshAdvancedInputsControl(node);
-  resizeAdvancedInputsNode(node);
-  if (isWirelessPack(node)) queueMicrotask(syncAllUnpacks);
-  node.graph?.afterChange?.();
-  node.graph?.setDirtyCanvas?.(true, true);
-  if (notify) node.graph?.change?.();
 }
 
 function initializeAdvancedInputsControl(node) {
@@ -653,6 +602,9 @@ function initializeAdvancedInputsControl(node) {
   if (typeof document === "undefined" || typeof node.addDOMWidget !== "function") return;
 
   const properties = nodeProperties(node);
+  // Remove the temporary custom-accordion state from workflows created by
+  // the previous implementation. Visibility is now owned by ComfyUI itself.
+  delete properties.terry_wire_bus_advanced_inputs_expanded;
   if (isUnpack(node) && properties[UNPACK_OUTPUT_MODE_PROPERTY] == null) {
     properties[UNPACK_OUTPUT_MODE_PROPERTY] = true;
   }
@@ -660,19 +612,6 @@ function initializeAdvancedInputsControl(node) {
 
   const root = document.createElement("div");
   root.className = "terry-bus-advanced-inputs";
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "terry-bus-advanced-toggle";
-  toggle.setAttribute("aria-expanded", "false");
-  const chevron = document.createElement("span");
-  chevron.className = "terry-bus-advanced-chevron";
-  chevron.textContent = "▸";
-  chevron.setAttribute("aria-hidden", "true");
-  const title = document.createElement("span");
-  toggle.append(chevron, title);
-
-  const panel = document.createElement("div");
-  panel.className = "terry-bus-advanced-panel";
 
   const portConfigRow = document.createElement("div");
   portConfigRow.className = "terry-bus-advanced-row";
@@ -681,7 +620,7 @@ function initializeAdvancedInputsControl(node) {
   const portConfigSlot = document.createElement("div");
   portConfigSlot.className = "terry-bus-advanced-port-config-slot";
   portConfigRow.append(portConfigLabel, portConfigSlot);
-  panel.append(portConfigRow);
+  root.append(portConfigRow);
 
   let outputMode = null;
   if (isUnpack(node)) {
@@ -697,7 +636,6 @@ function initializeAdvancedInputsControl(node) {
     thumb.className = "terry-bus-output-mode-thumb";
     button.append(thumb);
     row.append(label, button);
-    row.addEventListener("pointerdown", (event) => event.stopPropagation());
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -709,18 +647,12 @@ function initializeAdvancedInputsControl(node) {
       event.stopPropagation();
       setUnpackExpanded(node, !unpackExpanded(node));
     });
-    panel.append(row);
+    root.append(row);
     outputMode = { row, label, button, thumb };
   }
 
-  root.append(toggle, panel);
   root.addEventListener("pointerdown", (event) => event.stopPropagation());
   root.addEventListener("keydown", (event) => event.stopPropagation());
-  toggle.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setAdvancedInputsExpanded(node, !advancedInputsExpanded(node));
-  });
 
   const widget = node.addDOMWidget(
     "terry_bus_advanced_inputs",
@@ -729,6 +661,7 @@ function initializeAdvancedInputsControl(node) {
     {
       serialize: false,
       hideOnZoom: false,
+      advanced: true,
       margin: ADVANCED_INPUTS_MARGIN,
       getMinHeight: () => advancedInputsContentHeight(node),
       getMaxHeight: () => advancedInputsContentHeight(node),
@@ -738,11 +671,16 @@ function initializeAdvancedInputsControl(node) {
     root.remove?.();
     return;
   }
+
+  widget.options ||= {};
+  widget.options.advanced = true;
+  // options.advanced gates the Vue node and parameters panel; the legacy
+  // widget flag also gates the canvas surface on frontends that support it.
+  widget.advanced = true;
   widget.serialize = false;
   widget.computeSize = (width) => [width, advancedInputsContentHeight(node)];
   node.__terryBusAdvancedControl = {
-    widget, root, toggle, chevron, title, panel,
-    portConfigRow, portConfigLabel, portConfigSlot, outputMode,
+    widget, root, portConfigRow, portConfigLabel, portConfigSlot, outputMode,
   };
   refreshAdvancedInputsControl(node);
 }
@@ -1340,7 +1278,10 @@ function compactBusNodeHeight(laneCount) {
 
 function controlBlockHeight(node) {
   if (!isWireless(node)) return 0;
-  return 40 + advancedInputsContentHeight(node) + ADVANCED_INPUTS_MARGIN;
+  const advancedHeight = node.showAdvanced === true
+    ? advancedInputsContentHeight(node) + ADVANCED_INPUTS_MARGIN
+    : 0;
+  return 40 + advancedHeight;
 }
 
 function busOnlyWirelessHeight(node) {
@@ -1406,10 +1347,7 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   if (inheritsPairedHeight) {
     pairedHeight = stableExpandedHeight(pairedPack);
     if (pairedHeight > 0 && isUnpack(node)) {
-      pairedHeight += Math.max(
-        0,
-        advancedInputsContentHeight(node) - advancedInputsContentHeight(pairedPack)
-      );
+      pairedHeight += controlBlockHeight(node) - controlBlockHeight(pairedPack);
     }
     if (pairedHeight > 0) pairedHeight = Math.max(minHeight, pairedHeight);
   }
