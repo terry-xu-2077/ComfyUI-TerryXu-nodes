@@ -98,6 +98,22 @@ function install(node) {
       return height + 54 + rows * 178 + (rows - 1) * 12;
     }, 0);
   }
+  function fitLoadedHeight() {
+    const width = Math.max(320, Number(node.size?.[0]) || 640);
+    const target = Math.max(220, Math.ceil(contentHeight() + 48));
+    const current = Number(node.size?.[1]) || 0;
+    // Old DOM-widget versions could restore the 1400px maximum as the node
+    // height. Trim only excessive stale space; preserve intentional small sizes.
+    if (current > target + 48) {
+      node.setSize?.([width, target]);
+      node.setDirtyCanvas?.(true, true);
+    }
+  }
+  function scheduleLoadedHeightFit() {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!disposed) fitLoadedHeight();
+    }));
+  }
   function resizeForCollapse() {
     if (!anyCollapsed()) {
       const height = Number(node.properties?.[EXPANDED_HEIGHT_PROPERTY]);
@@ -359,10 +375,10 @@ function install(node) {
   root.addEventListener("pointerdown", event => event.stopPropagation());
   root.addEventListener("keydown", event => event.stopPropagation());
   const dom = node.addDOMWidget("media_cards", "terry_media_cards", root,
-    { serialize: false, hideOnZoom: false, getMinHeight: () => Math.min(700, Math.max(120, contentHeight())), getMaxHeight: () => 1400 });
+    { serialize: false, hideOnZoom: false, getMinHeight: () => Math.min(700, Math.max(120, contentHeight())), getMaxHeight: () => Math.max(120, contentHeight()) });
   dom.serialize = false;
   node.__terryBusLaneEntries = () => mediaLanes(node, groups());
-  node.__terryMediaLoader = { render, dispose() { disposed = true; picker?.close(); root.querySelectorAll("video,audio").forEach(media => media.pause()); } };
+  node.__terryMediaLoader = { render, fitLoadedHeight, scheduleLoadedHeightFit, dispose() { disposed = true; picker?.close(); root.querySelectorAll("video,audio").forEach(media => media.pause()); } };
   const changed = storage.callback;
   storage.callback = function () {
     const result = changed?.apply(this, arguments);
@@ -397,6 +413,7 @@ app.registerExtension({
         const result = previous?.apply(this, arguments);
         install(this); this.__terryMediaLoader.render();
         if (hook === "onNodeCreated") this.setSize([640, 800]);
+        else this.__terryMediaLoader.scheduleLoadedHeightFit();
         return result;
       };
     }
