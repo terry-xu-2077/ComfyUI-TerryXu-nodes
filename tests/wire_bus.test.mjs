@@ -392,16 +392,19 @@ test("wireless bus nodes can shrink after being enlarged", async () => {
   assert.deepEqual(node.__terryBusExpandedSize, [150, 120]);
 });
 
-test("Bus-In and Bus-Out keep port settings and spread output inside collapsed advanced inputs", async () => {
+test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async () => {
   const [wireSource, namedSource] = await Promise.all([
     readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"),
     readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"),
   ]);
   const wire = wireSource.replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
   const named = namedSource.replace(/^import .*;\r?\n/gm, "");
-  assert.match(wire, /advancedInputs: "高级输入"/);
-  assert.match(wire, /ADVANCED_INPUTS_EXPANDED_PROPERTY/);
-  assert.doesNotMatch(wire, /has-port-config-button/);
+  assert.match(wire, /advanced: true/);
+  assert.match(wire, /widget\.options\.advanced = true/);
+  assert.match(wire, /widget\.advanced = true/);
+  assert.match(wire, /node\.showAdvanced === true/);
+  assert.doesNotMatch(wire, /terry_wire_bus_advanced_inputs_expanded/);
+  assert.doesNotMatch(wire, /terry-bus-advanced-toggle|terry-bus-advanced-panel/);
   assert.match(named, /node\?\.__terryBusAdvancedControl\?\.portConfigSlot/);
 
   class Element {
@@ -434,41 +437,46 @@ test("Bus-In and Bus-Out keep port settings and spread output inside collapsed a
     app: { graph: { _nodes: [] }, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
     document, navigator: { language: "zh-CN" }, queueMicrotask() {},
   });
-  vm.runInContext(wire + "\nglobalThis.busTest = {initializeAdvancedInputsControl,advancedInputsExpanded,advancedInputsContentHeight,setAdvancedInputsExpanded,controlBlockHeight};", context);
+  vm.runInContext(wire + "\nglobalThis.busTest = {initializeAdvancedInputsControl,advancedInputsContentHeight,controlBlockHeight};", context);
 
   const graph = { _nodes: [], change() {}, beforeChange() {}, afterChange() {}, setDirtyCanvas() {}, getNodeById() { return null; } };
   const makeNode = (type, inputs, outputs) => ({
     id: type.endsWith("Pack") ? 1 : 2, type, graph, inputs, outputs, properties: {}, size: [180, 160],
     setSize(size) { this.size = size; },
     addDOMWidget(name, widgetType, root, options) {
-      this.domWidget = { name, root, options };
-      return {};
+      const widget = { options: { ...options }, serialize: true, _advanced: false };
+      Object.defineProperty(widget, "advanced", {
+        get() { return this._advanced; },
+        set(value) { this._advanced = Boolean(value); },
+      });
+      this.domWidget = { name, root, options, widget };
+      return widget;
     },
   });
 
   const pack = makeNode("TerryXuWirelessBusPack", [{ name: "wire", link: null }], [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }]);
   context.busTest.initializeAdvancedInputsControl(pack);
-  assert.equal(context.busTest.advancedInputsExpanded(pack), false);
-  assert.equal(pack.__terryBusAdvancedControl.panel.hidden, true);
-  assert.equal(context.busTest.advancedInputsContentHeight(pack), 26);
-  assert.equal(context.busTest.controlBlockHeight(pack), 70);
-  context.busTest.setAdvancedInputsExpanded(pack, true);
-  assert.equal(pack.__terryBusAdvancedControl.panel.hidden, false);
-  assert.equal(context.busTest.advancedInputsContentHeight(pack), 60);
-  assert.equal(context.busTest.controlBlockHeight(pack), 104);
+  assert.equal(pack.__terryBusAdvancedControl.widget.options.advanced, true);
+  assert.equal(pack.__terryBusAdvancedControl.widget.advanced, true);
+  assert.equal(pack.domWidget.root.children.length, 1);
+  assert.equal(pack.domWidget.root.children[0].className, "terry-bus-advanced-row");
+  assert.equal(context.busTest.advancedInputsContentHeight(pack), 30);
+  assert.equal(context.busTest.controlBlockHeight(pack), 40);
+  pack.showAdvanced = true;
+  assert.equal(context.busTest.controlBlockHeight(pack), 74);
 
   const unpack = makeNode("TerryXuWirelessBusUnpack", [{ name: "bus", link: null }], [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }]);
   context.busTest.initializeAdvancedInputsControl(unpack);
-  assert.equal(context.busTest.advancedInputsExpanded(unpack), false);
+  assert.equal(unpack.__terryBusAdvancedControl.widget.options.advanced, true);
+  assert.equal(unpack.__terryBusAdvancedControl.widget.advanced, true);
   assert.equal(unpack.properties.terry_wire_bus_expand_outputs, true);
-  assert.equal(unpack.__terryBusAdvancedControl.panel.hidden, true);
-  assert.equal(unpack.__terryBusAdvancedControl.outputMode.row.parentNode, unpack.__terryBusAdvancedControl.panel);
+  assert.equal(unpack.domWidget.root.children.length, 2);
+  assert.equal(unpack.__terryBusAdvancedControl.outputMode.row.parentNode, unpack.domWidget.root);
   assert.equal(unpack.__terryBusAdvancedControl.outputMode.label.textContent, "散开输出");
-  assert.equal(context.busTest.controlBlockHeight(unpack), 70);
-  context.busTest.setAdvancedInputsExpanded(unpack, true);
-  assert.equal(unpack.__terryBusAdvancedControl.panel.hidden, false);
-  assert.equal(context.busTest.advancedInputsContentHeight(unpack), 94);
-  assert.equal(context.busTest.controlBlockHeight(unpack), 138);
+  assert.equal(context.busTest.advancedInputsContentHeight(unpack), 64);
+  assert.equal(context.busTest.controlBlockHeight(unpack), 40);
+  unpack.showAdvanced = true;
+  assert.equal(context.busTest.controlBlockHeight(unpack), 108);
 });
 
 test("port pin icon is a vector outline that can be filled for the pinned state", async () => {
