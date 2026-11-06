@@ -467,9 +467,16 @@ test("port configuration exposes rename and pin state for each Bus-In port", asy
   assert.equal(pack.properties.terry_wire_bus_pinned_lanes.lane_camera, true);
 });
 
-test("wireless bus channel control receives the port configuration gear button", async () => {
-  const source = (await readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"))
-    .replace(/^import .*;\r?\n/gm, "");
+test("Bus-Out dropdown arrow reserves a separate slot beside the port configuration button", async () => {
+  const [source, wireSource] = await Promise.all([
+    readFile(new URL("../web/wire_bus_named_ports.js", import.meta.url), "utf8"),
+    readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"),
+  ]);
+  const busUi = source.replace(/^import .*;\r?\n/gm, "");
+  const wireUi = wireSource.replace(/^import .*;\r?\n/gm, "");
+  assert.match(wireUi, /is-select\.has-port-config-button::after\{\s*right:36px/);
+  assert.match(busUi, /box-sizing:border-box;flex:0 0 28px;width:28px/);
+  assert.match(busUi, /root\.classList\?\.add\("has-port-config-button"\)/);
   const context = vm.createContext({
     app: { graph: { _nodes: [] }, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
     document: {
@@ -487,10 +494,10 @@ test("wireless bus channel control receives the port configuration gear button",
     navigator: { language: "zh-CN" },
     setTimeout() {},
   });
-  vm.runInContext(source + "\nglobalThis.configTest = { ensurePortConfigButton };", context);
+  vm.runInContext(busUi + "\nglobalThis.configTest = { ensurePortConfigButton };", context);
 
   const appended = [];
-  const root = { querySelector() { return null; }, append(button) { appended.push(button); } };
+  const root = { classList: { values: [], add(value) { this.values.push(value); } }, querySelector() { return null; }, append(button) { appended.push(button); } };
   const node = { type: "TerryXuWirelessBusPack", __terryWirelessControl: { root } };
   context.configTest.ensurePortConfigButton(node);
 
@@ -498,6 +505,7 @@ test("wireless bus channel control receives the port configuration gear button",
   assert.equal(appended[0].className, "terry-wire-bus-port-config-button");
   assert.equal(appended[0].textContent, "⚙");
   assert.equal(appended[0].title, "端口配置");
+  assert.deepEqual(root.classList.values, ["has-port-config-button"]);
 });
 test("Bus-Out keeps its manual width with a Media Loader source", async () => {
   const source = (await readFile(new URL("../web/wire_bus.js", import.meta.url), "utf8"))
