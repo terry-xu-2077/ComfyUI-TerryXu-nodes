@@ -432,9 +432,15 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
     querySelector() { return null; }
   }
   const document = { head: new Element("head"), getElementById: () => null, createElement: tag => new Element(tag) };
+  let extension;
+  let alwaysShowAdvanced = false;
+  const app = {
+    graph: { _nodes: [] },
+    ui: { settings: { getSettingValue: key => key === "Comfy.Locale" ? "zh-CN" : alwaysShowAdvanced } },
+    registerExtension(value) { extension = value; },
+  };
   const context = vm.createContext({
-    app: { graph: { _nodes: [] }, ui: { settings: { getSettingValue: () => "zh-CN" } }, registerExtension() {} },
-    document, navigator: { language: "zh-CN" }, queueMicrotask() {},
+    app, document, navigator: { language: "zh-CN" }, queueMicrotask() {},
   });
   vm.runInContext(wire + "\nglobalThis.busTest = {initializeAdvancedInputsControl,advancedInputsContentHeight,controlBlockHeight};", context);
 
@@ -478,6 +484,50 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
   assert.equal(context.busTest.controlBlockHeight(unpack), 40);
   unpack.showAdvanced = true;
   assert.equal(context.busTest.controlBlockHeight(unpack), 108);
+
+  // The global ComfyUI setting also makes advanced widgets visible.
+  pack.showAdvanced = false;
+  alwaysShowAdvanced = true;
+  assert.equal(context.busTest.controlBlockHeight(pack), 74);
+  alwaysShowAdvanced = false;
+
+  // The native footer calls node.toggleAdvanced(). Bus nodes recalculate their
+  // compact layout after that state change without losing manual extra height.
+  function BusNodeType() {}
+  BusNodeType.prototype.computeSize = function () { return [112, 96]; };
+  BusNodeType.prototype.toggleAdvanced = function () {
+    if (!this.hasAdvancedWidgets()) return;
+    this.graph.incrementVersion();
+    this.showAdvanced = !this.showAdvanced;
+    this.expandToFitContent();
+    this.setDirtyCanvas(true, true);
+  };
+  extension.beforeRegisterNodeDef(BusNodeType, { name: "TerryXuWirelessBusPack" });
+  const busGraph = { _nodes: [], incrementVersion() {}, setDirtyCanvas() {} };
+  const busNode = Object.create(BusNodeType.prototype);
+  Object.assign(busNode, {
+    id: 30, type: "TerryXuWirelessBusPack", graph: busGraph,
+    inputs: [{ name: "wire" }, { name: "wire 2" }],
+    outputs: [{ name: "bus", type: "TERRY_WIRE_BUS" }],
+    properties: { terry_wire_bus_width: 180 },
+    size: [180, 136], showAdvanced: false, flags: {},
+    __terryBusLayoutInitialized: true, __terryBusPreferredHeight: 136,
+    __terryBusMinHeight: 100,
+    hasAdvancedWidgets() { return true; },
+    setSize(size) { this.size = [...size]; },
+    setDirtyCanvas() {},
+    expandToFitContent() { this.setSize(this.computeSize()); },
+  });
+  busNode.toggleAdvanced();
+  assert.deepEqual(busNode.size, [180, 170]);
+  assert.equal(busNode.widgets_start_y, 96);
+  busNode.toggleAdvanced();
+  assert.deepEqual(busNode.size, [180, 136]);
+  busNode.setSize([180, 156]);
+  busNode.toggleAdvanced();
+  assert.deepEqual(busNode.size, [180, 190]);
+  busNode.toggleAdvanced();
+  assert.deepEqual(busNode.size, [180, 156]);
 });
 
 test("port pin icon is a vector outline that can be filled for the pinned state", async () => {
