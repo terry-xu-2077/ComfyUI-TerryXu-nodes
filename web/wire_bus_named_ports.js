@@ -52,6 +52,7 @@ function labels() {
         rename: "端口名称",
         portConfig: "端口配置",
         fixed: "固定端口",
+        unfix: "取消固定",
         hint: "固定端口始终保留；仅改名不会固定端口，未连接的端口仍会自动清理。",
         empty: "暂无端口",
         close: "完成",
@@ -61,6 +62,7 @@ function labels() {
         rename: "Port name",
         portConfig: "Port settings",
         fixed: "Keep port",
+        unfix: "Unpin port",
         hint: "Pinned ports stay. Renaming alone does not pin a port; disconnected ports are still cleaned up.",
         empty: "No ports",
         close: "Done",
@@ -652,6 +654,24 @@ function setPortPinned(node, item, value) {
   else setUnpackOutputPinned(node, item.outputIndex, value);
 }
 
+function createPortPinIcon() {
+  const namespace = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "terry-wire-bus-port-pin-icon");
+  svg.setAttribute("aria-hidden", "true");
+
+  const head = document.createElementNS(namespace, "path");
+  head.setAttribute("class", "terry-wire-bus-port-pin-shape");
+  head.setAttribute("d", "M8.5 3.5h7l-1 5.1 3.1 3.1v1.6H6.4v-1.6l3.1-3.1-1-5.1Z");
+
+  const stem = document.createElementNS(namespace, "path");
+  stem.setAttribute("class", "terry-wire-bus-port-pin-stem");
+  stem.setAttribute("d", "M12 13.3v7.2");
+  svg.append(head, stem);
+  return svg;
+}
+
 function installPortConfigStyle() {
   if (typeof document === "undefined" || document.getElementById("terry-wire-bus-port-config-style")) return;
   const style = document.createElement("style");
@@ -705,11 +725,24 @@ function installPortConfigStyle() {
 .terry-wire-bus-port-config-name:focus{border-color:#799ac4;box-shadow:0 0 0 1px rgba(121,154,196,.2)}
 .terry-wire-bus-port-config-pin{
   display:grid;place-items:center;width:32px;height:30px;padding:0;border:1px solid #424954;
-  border-radius:7px;background:transparent;color:#788291;font-size:16px;cursor:pointer;
+  border-radius:7px;background:transparent;color:#7f8998;cursor:pointer;
+  transition:color .14s ease,border-color .14s ease,background .14s ease;
 }
-.terry-wire-bus-port-config-pin:hover{border-color:#8aa6cb;color:#cbdcf3}
+.terry-wire-bus-port-pin-icon{display:block;width:17px;height:17px;overflow:visible}
+.terry-wire-bus-port-pin-shape,.terry-wire-bus-port-pin-stem{
+  fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;
+}
+.terry-wire-bus-port-config-pin:hover{
+  border-color:#8392a5;color:#c5ceda;background:rgba(255,255,255,.045);
+}
 .terry-wire-bus-port-config-pin.is-pinned{
-  border-color:#7e9fc8;background:rgba(113,151,199,.16);color:#d8e8ff;
+  border-color:rgba(255,132,83,.62);background:rgba(255,117,64,.13);color:#ff8758;
+}
+.terry-wire-bus-port-config-pin.is-pinned .terry-wire-bus-port-pin-shape{
+  fill:currentColor;
+}
+.terry-wire-bus-port-config-pin.is-pinned:hover{
+  border-color:#ff9a73;background:rgba(255,117,64,.2);color:#ffa17d;
 }
 .terry-wire-bus-port-config-empty{padding:24px 8px;color:#8f98a6;text-align:center}
 .terry-wire-bus-port-config-foot{display:flex;justify-content:flex-end}
@@ -817,9 +850,9 @@ function openPortConfig(node) {
       const pin = document.createElement("button");
       pin.type = "button";
       pin.className = "terry-wire-bus-port-config-pin" + (item.pinned ? " is-pinned" : "");
-      pin.textContent = "📌";
-      pin.title = text.fixed;
-      pin.setAttribute("aria-label", text.fixed + " " + (index + 1));
+      pin.append(createPortPinIcon());
+      pin.title = item.pinned ? text.unfix : text.fixed;
+      pin.setAttribute("aria-label", (item.pinned ? text.unfix : text.fixed) + " " + (index + 1));
       pin.setAttribute("aria-pressed", String(item.pinned));
       let preparedPinClick = false;
       const prepareNameBeforePin = () => {
