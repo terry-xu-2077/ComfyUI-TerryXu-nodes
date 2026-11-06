@@ -412,6 +412,9 @@ function installWirelessControlStyle() {
   pointer-events:none;
   transform:rotate(45deg);
 }
+.terry-wireless-channel-control.is-select.has-port-config-button::after{
+  right:36px;
+}
 `;
   document.head.append(style);
 }
