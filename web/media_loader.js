@@ -87,20 +87,33 @@ function install(node) {
   const groups = () => readMedia(storage.value);
   const isCollapsed = kind => node.properties?.[COLLAPSED_PROPERTY]?.[kind] === true;
   const anyCollapsed = () => MEDIA_KINDS.some(isCollapsed);
-  function contentHeight() {
-    if (sections.scrollHeight > 0) return sections.scrollHeight + 24;
+  function estimateContentHeight(includeCollapsed = false) {
     const width = Math.max(320, Number(node.size?.[0]) || 640);
     const cols = Math.max(1, Math.floor((width - 52 + 12) / 172));
     const data = groups();
     return 24 + (MEDIA_KINDS.length - 1) * 8 + MEDIA_KINDS.reduce((height, kind) => {
-      if (isCollapsed(kind) || !data[kind].length) return height + 46;
+      if ((!includeCollapsed && isCollapsed(kind)) || !data[kind].length) return height + 46;
       const rows = Math.ceil(data[kind].length / cols);
       return height + 54 + rows * 178 + (rows - 1) * 12;
     }, 0);
   }
+  function contentHeight() {
+    const estimated = estimateContentHeight();
+    if (sections.scrollHeight > 0) {
+      // Some restored DOM widgets report their stretched viewport as content.
+      // Keep a small measurement tolerance without inheriting a stale max height.
+      return Math.min(sections.scrollHeight + 24, estimated + 96);
+    }
+    return estimated;
+  }
   function fitLoadedHeight() {
     const width = Math.max(320, Number(node.size?.[0]) || 640);
     const target = Math.max(220, Math.ceil(contentHeight() + 48));
+    const expandedTarget = Math.max(220, Math.ceil(estimateContentHeight(true) + 48));
+    const savedExpanded = Number(node.properties?.[EXPANDED_HEIGHT_PROPERTY]) || 0;
+    if (savedExpanded > expandedTarget + 48) {
+      node.properties[EXPANDED_HEIGHT_PROPERTY] = expandedTarget;
+    }
     const current = Number(node.size?.[1]) || 0;
     // Old DOM-widget versions could restore the 1400px maximum as the node
     // height. Trim only excessive stale space; preserve intentional small sizes.
