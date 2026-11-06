@@ -442,7 +442,8 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
   const context = vm.createContext({
     app, document, navigator: { language: "zh-CN" }, queueMicrotask() {},
   });
-  vm.runInContext(wire + "\nglobalThis.busTest = {initializeAdvancedInputsControl,advancedInputsContentHeight,controlBlockHeight};", context);
+  vm.runInContext("globalThis.LiteGraph = {vueNodesMode: false};", context);
+  vm.runInContext(wire + "\nglobalThis.busTest = {initializeAdvancedInputsControl,advancedInputsContentHeight,controlBlockHeight,nativeAdvancedFooterReserveHeight,nodeControlAreaHeight,resizeCompactBusNode};", context);
 
   const graph = { _nodes: [], change() {}, beforeChange() {}, afterChange() {}, setDirtyCanvas() {}, getNodeById() { return null; } };
   const makeNode = (type, inputs, outputs) => ({
@@ -484,6 +485,46 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
   assert.equal(context.busTest.controlBlockHeight(unpack), 40);
   unpack.showAdvanced = true;
   assert.equal(context.busTest.controlBlockHeight(unpack), 108);
+
+  // Legacy canvas mode has no Vue NodeFooter to reserve.
+  assert.equal(context.busTest.nativeAdvancedFooterReserveHeight(pack), 0);
+  assert.equal(context.busTest.nodeControlAreaHeight(pack), 40);
+
+  // Vue nodes render a native footer after the widget grid. Its 44px button,
+  // -20px top margin and 12px body bottom padding require 36px of extra room.
+  vm.runInContext("globalThis.LiteGraph.vueNodesMode = true;", context);
+  pack.showAdvanced = false;
+  assert.equal(context.busTest.nativeAdvancedFooterReserveHeight(pack), 36);
+  assert.equal(context.busTest.nodeControlAreaHeight(pack), 76);
+  pack.showAdvanced = true;
+  assert.equal(context.busTest.nodeControlAreaHeight(pack), 110);
+  pack.showAdvanced = false;
+
+  const vuePack = makeNode(
+    "TerryXuWirelessBusPack",
+    [{ name: "wire", link: null }, { name: "wire 2", link: null }],
+    [{ name: "bus", type: "TERRY_WIRE_BUS", links: [] }]
+  );
+  context.busTest.resizeCompactBusNode(vuePack, 1, null);
+  assert.equal(vuePack.size[1], 172);
+  assert.equal(vuePack.widgets_start_y, 96);
+  vuePack.showAdvanced = true;
+  context.busTest.resizeCompactBusNode(vuePack, 1, null);
+  assert.equal(vuePack.size[1], 206);
+  assert.equal(vuePack.widgets_start_y, 96);
+
+  const vueUnpack = makeNode(
+    "TerryXuWirelessBusUnpack",
+    [{ name: "bus", link: null }],
+    [{ name: "width", type: "INT" }]
+  );
+  context.busTest.initializeAdvancedInputsControl(vueUnpack);
+  context.busTest.resizeCompactBusNode(vueUnpack, 1, null);
+  assert.equal(vueUnpack.size[1], 172);
+  vueUnpack.showAdvanced = true;
+  context.busTest.resizeCompactBusNode(vueUnpack, 1, null);
+  assert.equal(vueUnpack.size[1], 240);
+  assert.equal(vueUnpack.widgets_start_y, 96);
 
   // The global ComfyUI setting also makes advanced widgets visible.
   pack.showAdvanced = false;
