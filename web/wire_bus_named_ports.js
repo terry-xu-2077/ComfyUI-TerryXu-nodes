@@ -331,7 +331,12 @@ function syncNodes2OutputLabels(unpack) {
 
   const rows = [...root.querySelectorAll(".lg-slot--output")];
   const entries = outputRenameEntries(unpack);
-  rows.forEach((row) => row.classList.remove("terry-wire-bus-renamable-output"));
+  rows.forEach((row, index) => {
+    row.classList.remove("terry-wire-bus-renamable-output");
+    const span = row.querySelector(".text-node-component-slot-text");
+    const output = unpack.outputs?.[index];
+    if (span) span.textContent = String(output?.label || output?.name || "");
+  });
   for (const entry of entries) {
     const row = rows[entry.outputIndex];
     if (!row) continue;
