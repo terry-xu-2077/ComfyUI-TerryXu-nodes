@@ -86,6 +86,16 @@ async function fixture() {
   return { makeNode, section, toggle, busSyncs: () => busSyncs };
 }
 
+test("Media Loader bounds its DOM widget to content and trims stale oversized height after reload", async () => {
+  const { makeNode } = await fixture();
+  const node = makeNode({}, [640, 1600]);
+
+  assert.equal(node.domOptions.getMinHeight(), 700);
+  assert.equal(node.domOptions.getMaxHeight(), 1116);
+  node.__terryMediaLoader.fitLoadedHeight();
+  assert.equal(node.size[1], 1164);
+});
+
 test("each media section folds independently without changing its assets or bus", async () => {
   const { makeNode, section, toggle, busSyncs } = await fixture();
   const node = makeNode();
