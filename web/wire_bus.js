@@ -1167,6 +1167,17 @@ function mediaEntriesForUnpack(unpack, pack, entries) {
   return result;
 }
 
+function mediaPortLabel(entry, entries, index) {
+  const type = String(entry?.type || "").toUpperCase();
+  const prefix = type === "IMAGE" ? (isChineseLocale() ? "图片" : "Image")
+    : type === "AUDIO" ? (isChineseLocale() ? "音频" : "Audio")
+      : type === "VIDEO" ? (isChineseLocale() ? "视频" : "Video")
+        : labels().output;
+  const ordinal = entries.slice(0, index + 1).filter((item) =>
+    String(item?.type || "").toUpperCase() === type
+  ).length || index + 1;
+  return `${prefix} ${ordinal}`;
+}
 function signatureForEntries(entries) {
   return entries.map((entry) =>
     `${entry.laneId}:${entry.mediaPack?.id ?? ""}:${entry.source?.nodeId ?? ""}:${entry.source?.slot ?? ""}:${entry.type}:${entry.name}:${entry.empty ? "empty" : "full"}`
@@ -1395,10 +1406,8 @@ function syncUnpack(unpack, force = false) {
         output?.[LANE_FIELD] === entries[index].laneId
         && output.type === entries[index].type
         && output.name === (entries[index].synthetic
-          ? emptyLaneLabel(entries[index].name, index)
-          : (entries[index].source || entries[index].mediaPack
-            ? entries[index].name
-            : emptyLaneLabel(entries[index].name, index)))
+          ? emptyLaneLabel(mediaPortLabel(entries[index], entries, index), index)
+          : mediaPortLabel(entries[index], entries, index))
       );
     if (!force && unpack.__terryBusSignature === signature
       && (!hasMediaLanes || mediaPortsMatch)) {
@@ -1412,7 +1421,7 @@ function syncUnpack(unpack, force = false) {
       while ((unpack.outputs?.length || 0) < entries.length) {
         const index = unpack.outputs?.length || 0;
         const entry = entries[index];
-        const added = unpack.addOutput?.(entry?.name || labels().output, entry?.type || EMPTY_TYPE);
+        const added = unpack.addOutput?.(mediaPortLabel(entry, entries, index), entry?.type || EMPTY_TYPE);
         if (!unpack.outputs?.[index] && !added) break;
       }
       for (let index = 0; index < entries.length; index++) {
@@ -1421,11 +1430,8 @@ function syncUnpack(unpack, force = false) {
         if (!output) continue;
         output[LANE_FIELD] = entry.laneId;
         output.type = entry.type || EMPTY_TYPE;
-        output.name = entry.synthetic
-          ? emptyLaneLabel(entry.name, index)
-          : (entry.source || entry.mediaPack
-            ? entry.name
-            : emptyLaneLabel(entry.name || `${labels().input} ${index + 1}`, index));
+        const portName = mediaPortLabel(entry, entries, index);
+        output.name = entry.synthetic ? emptyLaneLabel(portName, index) : portName;
         output.label = output.name;
         for (const linkId of output.links || []) syncConnectionType(unpack.graph, linkId, output.type);
       }
@@ -1452,13 +1458,19 @@ function syncUnpack(unpack, force = false) {
     }
     for (let index = 0; index < entries.length; index++) {
       const entry = entries[index];
-      const output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
+      const output = hasMediaLanes
+        ? unpack.outputs?.[index]
+        : (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === entry.laneId);
       if (!output) continue;
       delete output[BUS_OUTPUT_FIELD];
       output.type = entry.type || EMPTY_TYPE;
       if (output.type === BUS_TYPE) {
         output.name = "bus";
         output.label = labels().bus;
+      } else if (hasMediaLanes) {
+        const portName = mediaPortLabel(entry, entries, index);
+        output.name = entry.synthetic ? emptyLaneLabel(portName, index) : portName;
+        output.label = output.name;
       } else {
         output.name = entry.synthetic
           ? emptyLaneLabel(entry.name, index)
