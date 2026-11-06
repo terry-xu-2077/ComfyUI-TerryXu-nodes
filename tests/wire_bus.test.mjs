@@ -468,6 +468,11 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
   assert.equal(pack.__terryBusAdvancedControl.widget.advanced, true);
   assert.equal(pack.domWidget.root.children.length, 1);
   assert.equal(pack.domWidget.root.children[0].className, "terry-bus-advanced-row");
+  assert.equal(pack.domWidget.root.style.display, "grid");
+  assert.equal(pack.domWidget.root.style.gridTemplateRows, "30px");
+  assert.equal(pack.domWidget.root.style.height, "30px");
+  assert.equal(pack.domWidget.root.style.flex, "0 0 30px");
+  assert.equal(pack.__terryBusAdvancedControl.widget.computeSize, undefined);
   assert.equal(context.busTest.advancedInputsContentHeight(pack), 30);
   assert.equal(context.busTest.controlBlockHeight(pack), 40);
   pack.showAdvanced = true;
@@ -479,6 +484,11 @@ test("Bus-In and Bus-Out use ComfyUI native advanced widget visibility", async (
   assert.equal(unpack.__terryBusAdvancedControl.widget.advanced, true);
   assert.equal(unpack.properties.terry_wire_bus_expand_outputs, true);
   assert.equal(unpack.domWidget.root.children.length, 2);
+  assert.equal(unpack.domWidget.root.style.display, "grid");
+  assert.equal(unpack.domWidget.root.style.gridTemplateRows, "30px 30px");
+  assert.equal(unpack.domWidget.root.style.rowGap, "4px");
+  assert.equal(unpack.domWidget.root.style.height, "64px");
+  assert.equal(unpack.domWidget.root.style.flex, "0 0 64px");
   assert.equal(unpack.__terryBusAdvancedControl.outputMode.row.parentNode, unpack.domWidget.root);
   assert.equal(unpack.__terryBusAdvancedControl.outputMode.label.textContent, "散开输出");
   assert.equal(context.busTest.advancedInputsContentHeight(unpack), 64);
