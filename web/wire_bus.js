@@ -2074,6 +2074,27 @@ app.registerExtension({
       };
     }
 
+    const originalToggleAdvanced = nodeType.prototype.toggleAdvanced;
+    if (
+      typeof originalToggleAdvanced === "function"
+      && !nodeType.prototype.__terryBusToggleAdvancedPatched
+    ) {
+      nodeType.prototype.toggleAdvanced = function () {
+        const result = originalToggleAdvanced.apply(this, arguments);
+        const laneCount = isPackDef
+          ? Math.max(0, Number(this.inputs?.length || 0) - 1)
+          : Number(this.outputs?.length || 0);
+        const pairedPack = isPackDef ? null : findPackFromUnpack(this);
+        resizeCompactBusNode(this, laneCount, pairedPack);
+        if (isPackDef) queueMicrotask(syncAllUnpacks);
+        return result;
+      };
+      Object.defineProperty(nodeType.prototype, "__terryBusToggleAdvancedPatched", {
+        value: true,
+        configurable: true,
+      });
+    }
+
     const originalComputeSize = nodeType.prototype.computeSize;
     nodeType.prototype.computeSize = function () {
       const size = originalComputeSize?.apply?.(this, arguments) || [COMPACT_NODE_WIDTH, 0];
