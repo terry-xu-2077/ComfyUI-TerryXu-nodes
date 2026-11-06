@@ -11,11 +11,15 @@ const EMPTY_TYPE = "*";
 
 const PACK_LANES_PROPERTY = "terry_wire_bus_lanes";
 const PACK_NAMED_LANES_PROPERTY = "terry_wire_bus_named_lanes";
+const PACK_PINNED_LANES_PROPERTY = "terry_wire_bus_pinned_lanes";
 const UNPACK_LANES_PROPERTY = "terry_wire_bus_lane_ids";
 const WIRELESS_CHANNEL_PROPERTY = "terry_wireless_bus_channel";
 const UNPACK_OUTPUT_MODE_PROPERTY = "terry_wire_bus_expand_outputs";
 const UNPACK_SAVED_LINKS_PROPERTY = "terry_wire_bus_saved_output_links";
 const UNPACK_NAMED_OUTPUTS_PROPERTY = "terry_wire_bus_named_outputs";
+const UNPACK_PINNED_OUTPUTS_PROPERTY = "terry_wire_bus_pinned_outputs";
+const UNPACK_PINNED_OUTPUT_TYPES_PROPERTY = "terry_wire_bus_pinned_output_types";
+const UNPACK_PINNED_OUTPUT_DEFAULTS_PROPERTY = "terry_wire_bus_pinned_output_defaults";
 const UNPACK_MEDIA_OUTPUTS_PROPERTY = "terry_wire_bus_media_outputs";
 const BUS_WIDTH_PROPERTY = "terry_wire_bus_width";
 
@@ -918,6 +922,11 @@ function storedPackLanes(pack) {
     && !Array.isArray(properties[PACK_NAMED_LANES_PROPERTY])
     ? properties[PACK_NAMED_LANES_PROPERTY]
     : {};
+  const pinnedLanes = properties[PACK_PINNED_LANES_PROPERTY]
+    && typeof properties[PACK_PINNED_LANES_PROPERTY] === "object"
+    && !Array.isArray(properties[PACK_PINNED_LANES_PROPERTY])
+    ? properties[PACK_PINNED_LANES_PROPERTY]
+    : {};
   const lanes = [];
   const seen = new Set();
   for (const value of raw) {
@@ -931,6 +940,7 @@ function storedPackLanes(pack) {
       name: manualName || String(lane.name || "").trim(),
       type: String(lane.type || EMPTY_TYPE).trim() || EMPTY_TYPE,
       named: Boolean(manualName),
+      pinned: pinnedLanes[id] === true,
     });
   }
   properties[PACK_LANES_PROPERTY] = lanes;
@@ -958,6 +968,7 @@ function ensurePackLanes(pack) {
   const stored = storedPackLanes(pack);
   const byId = new Map(stored.map((lane) => [lane.id, lane]));
   const manualNames = nodeProperties(pack)[PACK_NAMED_LANES_PROPERTY] || {};
+  const pinnedLanes = nodeProperties(pack)[PACK_PINNED_LANES_PROPERTY] || {};
   const inputs = pack.inputs || [];
   const hasAddWire = inputs.length > 0 && isAddWireInput(inputs[inputs.length - 1]);
   const laneInputCount = inputs.length - (hasAddWire ? 1 : 0);
@@ -982,6 +993,7 @@ function ensurePackLanes(pack) {
       name: manualName || String(previous.name || input.label || input.name || "").trim(),
       type: String(previous.type || input.type || EMPTY_TYPE).trim() || EMPTY_TYPE,
       named: Boolean(manualName),
+      pinned: pinnedLanes[id] === true,
     });
   }
 
@@ -1021,13 +1033,20 @@ function ensureUnpackLaneIds(unpack, lanes) {
   return ids;
 }
 
+function isUnpackOutputPinned(unpack, outputIndex) {
+  const pinned = unpack?.properties?.[UNPACK_PINNED_OUTPUTS_PROPERTY];
+  return Boolean(pinned && typeof pinned === "object" && pinned[String(outputIndex)] === true);
+}
+
 function laneHasOutputLinks(pack, laneId) {
   const lanes = ensurePackLanes(pack);
   for (const unpack of connectedUnpacksForPack(pack)) {
     if (!unpackExpanded(unpack)) continue;
     ensureUnpackLaneIds(unpack, lanes);
-    const output = (unpack.outputs || []).find((item) => item?.[LANE_FIELD] === laneId);
-    if ((output?.links?.length || 0) > 0) return true;
+    const outputIndex = (unpack.outputs || []).findIndex((item) => item?.[LANE_FIELD] === laneId);
+    if (outputIndex < 0) continue;
+    const output = unpack.outputs[outputIndex];
+    if ((output?.links?.length || 0) > 0 || isUnpackOutputPinned(unpack, outputIndex)) return true;
   }
   return false;
 }
@@ -1111,6 +1130,70 @@ function disconnectAllOutputLinks(node, outputIndex) {
   }
 }
 
+function shiftIndexedNodeProperty(node, property, removedIndex) {
+  const current = node?.properties?.[property];
+  if (!current || typeof current !== "object" || Array.isArray(current)) return;
+  const next = {};
+  for (const [key, value] of Object.entries(current)) {
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0) continue;
+    if (index < removedIndex) next[String(index)] = value;
+    else if (index > removedIndex) next[String(index - 1)] = value;
+  }
+  if (Object.keys(next).length) node.properties[property] = next;
+  else delete node.properties[property];
+}
+
+function removeUnpackOutputAt(unpack, outputIndex) {
+  const output = unpack?.outputs?.[outputIndex];
+  if (!output || (output.links?.length || 0) > 0 || isUnpackOutputPinned(unpack, outputIndex)) return false;
+  unpack.removeOutput?.(outputIndex);
+  shiftIndexedNodeProperty(unpack, UNPACK_NAMED_OUTPUTS_PROPERTY, outputIndex);
+  shiftIndexedNodeProperty(unpack, UNPACK_PINNED_OUTPUTS_PROPERTY, outputIndex);
+  shiftIndexedNodeProperty(unpack, UNPACK_PINNED_OUTPUT_TYPES_PROPERTY, outputIndex);
+  shiftIndexedNodeProperty(unpack, UNPACK_PINNED_OUTPUT_DEFAULTS_PROPERTY, outputIndex);
+  const laneIds = unpack.properties?.[UNPACK_LANES_PROPERTY];
+  if (Array.isArray(laneIds)) {
+    laneIds.splice(outputIndex, 1);
+    if (!laneIds.length) delete unpack.properties[UNPACK_LANES_PROPERTY];
+  }
+  return true;
+}
+
+function restorePinnedUnpackOutputs(unpack) {
+  const pinned = unpack?.properties?.[UNPACK_PINNED_OUTPUTS_PROPERTY];
+  if (!pinned || typeof pinned !== "object" || Array.isArray(pinned)) return;
+  const indices = Object.entries(pinned)
+    .filter(([key, value]) => value === true && Number.isInteger(Number(key)) && Number(key) >= 0)
+    .map(([key]) => Number(key));
+  if (!indices.length) return;
+  const required = Math.max(...indices) + 1;
+  while ((unpack.outputs?.length || 0) < required) {
+    const index = unpack.outputs?.length || 0;
+    const properties = unpack.properties || {};
+    const defaultName = String(
+      properties[UNPACK_PINNED_OUTPUT_DEFAULTS_PROPERTY]?.[String(index)]
+      || `${labels().input} ${index + 1}`
+    );
+    const name = String(properties[UNPACK_NAMED_OUTPUTS_PROPERTY]?.[String(index)] || defaultName);
+    const type = String(properties[UNPACK_PINNED_OUTPUT_TYPES_PROPERTY]?.[String(index)] || EMPTY_TYPE);
+    const output = unpack.addOutput?.(name, type);
+    const current = unpack.outputs?.[index] || output;
+    if (!current) break;
+    current.__terryBusDefaultLabel = defaultName;
+    const savedLaneId = properties[UNPACK_LANES_PROPERTY]?.[index];
+    if (savedLaneId) current[LANE_FIELD] = savedLaneId;
+  }
+}
+
+function pruneUnpackOutputsWithoutSource(unpack) {
+  for (let index = (unpack?.outputs?.length || 0) - 1; index >= 0; index--) {
+    const output = unpack.outputs[index];
+    if ((output?.links?.length || 0) > 0 || isUnpackOutputPinned(unpack, index)) continue;
+    removeUnpackOutputAt(unpack, index);
+  }
+}
+
 function removeAllOutputs(node) {
   for (let index = (node.outputs?.length || 0) - 1; index >= 0; index--) {
     disconnectAllOutputLinks(node, index);
@@ -1147,7 +1230,20 @@ function mediaEntriesForUnpack(unpack, pack, entries) {
   const mediaPack = mediaLaneSource(pack, entries);
   if (!mediaPack) return entries;
 
-  const total = Math.max(entries.length, unpack.outputs?.length || 0);
+  let total = entries.length;
+  const pinnedOutputs = unpack?.properties?.[UNPACK_PINNED_OUTPUTS_PROPERTY];
+  if (pinnedOutputs && typeof pinnedOutputs === "object") {
+    for (const [key, pinned] of Object.entries(pinnedOutputs)) {
+      const index = Number(key);
+      if (pinned === true && Number.isInteger(index) && index >= 0) total = Math.max(total, index + 1);
+    }
+  }
+  for (let index = entries.length; index < (unpack.outputs?.length || 0); index++) {
+    const output = unpack.outputs[index];
+    if ((output?.links?.length || 0) > 0 || isUnpackOutputPinned(unpack, index)) {
+      total = Math.max(total, index + 1);
+    }
+  }
   const result = [...entries];
   for (let index = entries.length; index < total; index++) {
     const output = unpack.outputs?.[index];
@@ -1250,9 +1346,9 @@ function stableExpandedHeight(node, fallback = 0) {
   if (!node) return Math.max(0, Number(fallback) || 0);
   const current = node.flags?.collapsed ? 0 : (Number(node.size?.[1]) || 0);
   const stored = Number(node.__terryBusExpandedSize?.[1]) || 0;
-  const preferred = Number(node.__terryBusPreferredHeight) || 0;
   const minimum = Number(node.__terryBusMinHeight) || 0;
-  return Math.max(Number(fallback) || 0, current, stored, preferred, minimum);
+  const actual = current > 0 ? current : stored;
+  return Math.max(Number(fallback) || 0, actual, minimum);
 }
 
 function resizeCompactBusNode(node, laneCount, pairedPack = null) {
@@ -1282,7 +1378,7 @@ function resizeCompactBusNode(node, laneCount, pairedPack = null) {
   const storedWidth = Number(node.properties?.[BUS_WIDTH_PROPERTY]) || 0;
   const width = Math.max(
     COMPACT_NODE_WIDTH,
-    storedWidth || (initialized ? currentWidth : COMPACT_NODE_WIDTH)
+    initialized ? currentWidth : (storedWidth || currentWidth || COMPACT_NODE_WIDTH)
   );
 
   const inheritsPairedHeight = !busOnly && (
@@ -1374,9 +1470,11 @@ function syncUnpack(unpack, force = false) {
     if (isWirelessUnpack(unpack)) unpack.__terryWirelessControl?.refresh?.();
 
     const pack = findPackFromUnpack(unpack);
+    if (unpackExpanded(unpack)) restorePinnedUnpackOutputs(unpack);
     if (!pack && unpackExpanded(unpack) && (unpack.outputs?.length || 0) > 0) {
-      // A temporary upstream disconnect must not tear down the Bus-Out interface.
-      // Keep every output slot and its downstream links until another source is connected.
+      // Keep linked and pinned outputs during an upstream disconnect. Renamed-only
+      // outputs without either connection are transient and should be cleaned up.
+      pruneUnpackOutputsWithoutSource(unpack);
       unpack.__terryBusSignature = null;
       unpack.__terryBusRefreshVisual?.();
       unpack.graph?.setDirtyCanvas?.(true, true);
@@ -1433,6 +1531,9 @@ function syncUnpack(unpack, force = false) {
     unpack.__terryBusSignature = signature;
 
     if (hasMediaLanes) {
+      while ((unpack.outputs?.length || 0) > entries.length) {
+        if (!removeUnpackOutputAt(unpack, (unpack.outputs?.length || 0) - 1)) break;
+      }
       while ((unpack.outputs?.length || 0) < entries.length) {
         const index = unpack.outputs?.length || 0;
         const entry = entries[index];
@@ -1459,8 +1560,8 @@ function syncUnpack(unpack, force = false) {
       for (let index = (unpack.outputs?.length || 0) - 1; index >= 0; index--) {
         const output = unpack.outputs[index];
         if (desiredIds.has(output?.[LANE_FIELD])) continue;
-        disconnectAllOutputLinks(unpack, index);
-        unpack.removeOutput?.(index);
+        if ((output?.links?.length || 0) > 0 || isUnpackOutputPinned(unpack, index)) continue;
+        removeUnpackOutputAt(unpack, index);
       }
 
       for (const entry of entries) {
@@ -1491,9 +1592,10 @@ function syncUnpack(unpack, force = false) {
         output.name = entry.synthetic ? emptyLaneLabel(portName, index) : portName;
         output.label = output.name;
       } else {
-        output.name = entry.synthetic
+        const namedOutput = String(nodeProperties(unpack)[UNPACK_NAMED_OUTPUTS_PROPERTY]?.[String(index)] || "").trim();
+        output.name = namedOutput || (entry.synthetic
           ? emptyLaneLabel(entry.name, index)
-          : (entry.source || entry.mediaPack ? entry.name : emptyLaneLabel(entry.name, index));
+          : (entry.source || entry.mediaPack ? entry.name : emptyLaneLabel(entry.name, index)));
         output.label = output.name;
       }
       for (const linkId of output.links || []) syncConnectionType(unpack.graph, linkId, output.type);
@@ -1577,7 +1679,7 @@ function refreshPackSlots(pack) {
   for (const unpack of connectedUnpacksForPack(pack)) syncUnpack(unpack, true);
 
   const removable = entries.filter((entry) =>
-    !entry.lane?.named
+    !entry.lane?.pinned
     && !entry.source
     && entry.input?.link == null
     && !laneHasOutputLinks(pack, entry.laneId)
@@ -1587,6 +1689,10 @@ function refreshPackSlots(pack) {
     if (index >= 0) pack.removeInput?.(index);
     const lanes = storedPackLanes(pack);
     nodeProperties(pack)[PACK_LANES_PROPERTY] = lanes.filter((lane) => lane.id !== entry.laneId);
+    const names = nodeProperties(pack)[PACK_NAMED_LANES_PROPERTY];
+    if (names && typeof names === "object") delete names[entry.laneId];
+    const pinned = nodeProperties(pack)[PACK_PINNED_LANES_PROPERTY];
+    if (pinned && typeof pinned === "object") delete pinned[entry.laneId];
   }
 
   entries = packLaneEntries(pack);
